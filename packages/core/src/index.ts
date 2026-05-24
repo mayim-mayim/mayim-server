@@ -234,7 +234,7 @@ export interface PaidSurfaceChallenge {
 
 // --- v1.7.1 ---
 export type StandardProfile =
-  | "ln_church.v1"
+  | "ln_church.metadata.v1"
   | "http402.generic"
   | "l402"
   | "x402"
@@ -264,7 +264,7 @@ export interface PaidSurfaceMapper<TChallenge = unknown, TReceipt = unknown> {
 }
 
 export const lnChurchV1Mapper: PaidSurfaceMapper<PaidSurfaceChallenge, ExecutionReceipt> = {
-  profile: "ln_church.v1",
+  profile: "ln_church.metadata.v1",
   mapChallenge: (challenge) => challenge,
   mapReceipt: (receipt) => receipt
 };
@@ -416,7 +416,7 @@ export class Payment402 {
     ): PaidSurfaceChallenge;
     public buildPaidSurfaceChallenge(
         requirements: PaymentRequirement | PaymentRequirement[],
-        options: { profile: "ln_church.v1" }
+        options: { profile: "ln_church.metadata.v1" }
     ): PaidSurfaceChallenge;
     public buildPaidSurfaceChallenge<T>(
         requirements: PaymentRequirement | PaymentRequirement[],
@@ -494,7 +494,7 @@ export class Payment402 {
             return options.mapper.mapChallenge(challenge);
         }
 
-        if (options?.profile && options.profile !== "ln_church.v1") {
+        if (options?.profile && options.profile !== "ln_church.metadata.v1") {
             throw new UnsupportedStandardProfileError(options.profile);
         }
 
@@ -503,7 +503,7 @@ export class Payment402 {
 
     // ========== 2. buildExecutionReceipt のオーバーロードと実装 ==========
     public buildExecutionReceipt(input: BuildExecutionReceiptInput): ExecutionReceipt;
-    public buildExecutionReceipt(input: BuildExecutionReceiptInput, options: { profile: "ln_church.v1" }): ExecutionReceipt;
+    public buildExecutionReceipt(input: BuildExecutionReceiptInput, options: { profile: "ln_church.metadata.v1" }): ExecutionReceipt;
     public buildExecutionReceipt<T>(input: BuildExecutionReceiptInput, options: { mapper: PaidSurfaceMapper<any, T> }): T;
     public buildExecutionReceipt(
         input: BuildExecutionReceiptInput,
@@ -587,7 +587,7 @@ export class Payment402 {
             return options.mapper.mapReceipt(receipt);
         }
 
-        if (options?.profile && options.profile !== "ln_church.v1") {
+        if (options?.profile && options.profile !== "ln_church.metadata.v1") {
             throw new UnsupportedStandardProfileError(options.profile);
         }
 
@@ -595,3 +595,4 @@ export class Payment402 {
     }
 }
 
+export * from './paid-surface-manifest';

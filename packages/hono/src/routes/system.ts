@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { ShrineClient } from '../integration/ShrineClient';
 import { MONZEN_CONFIG } from '../core/config';
+import { PAID_SURFACE_CATALOG } from '../core/paid-surfaces';
+import { buildProviderDeclaredObservationDraft } from '@ln-church/server';
 
 type Bindings = {
     FAUCET_SECRET: string;
@@ -10,78 +12,6 @@ type Bindings = {
 };
 
 const systemApp = new Hono<{ Bindings: Bindings }>();
-
-// ★ 新規追加: Manifest 用の Paid Surface カタログ定義
-const BENCHMARK_PING_PAID_SURFACE = {
-    surface_id: "benchmark:ping:v1",
-    path: "/api/agent/benchmark/ping",
-    method: "GET",
-    kind: "benchmark",
-    action_type: "benchmark_ping",
-    payment_intent: "benchmark",
-    deterministic: true,
-    agent_readable: true,
-    accepted_payments: [
-        { asset: "SATS", amount: 10, settlement_rail: "l402", access_path: "direct_settlement" },
-        { asset: "FAUCET_CREDIT", amount: 1, settlement_rail: "faucet", access_path: "faucet" },
-        { asset: "GRANT_CREDIT", amount: 1, settlement_rail: "none", access_path: "sponsored_grant" }
-    ],
-    expected_client_behavior: {
-        action: "pay_and_verify",
-        reason: "This endpoint is a deterministic paid benchmark. Agents should pay once, execute once, and verify the execution receipt."
-    },
-    evidence_schema: {
-        schema_version: "ln_church.execution_receipt.v1",
-        required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"],
-        optional: ["surface_id", "resource", "action_type", "proof_reference", "recorded_hash"]
-    },
-    challenge_schema_version: "ln_church.paid_surface_challenge.v1",
-    receipt_schema_version: "ln_church.execution_receipt.v1",
-    links: {
-        challenge: "/api/agent/benchmark/ping",
-        execute: "/api/agent/benchmark/ping",
-        docs: "/api/agent/manifest"
-    }
-};
-
-const JSON_REPAIR_PAID_SURFACE = {
-    surface_id: "skill:json-repair:v1", path: "/api/agent/json-repair", method: "POST", kind: "skill", action_type: "json_repair", payment_intent: "charge", deterministic: true, agent_readable: true,
-    accepted_payments: [
-        { asset: "SATS", amount: 50, settlement_rail: "l402", access_path: "direct_settlement" },
-        { asset: "FAUCET_CREDIT", amount: 2, settlement_rail: "faucet", access_path: "faucet" },
-        { asset: "GRANT_CREDIT", amount: 2, settlement_rail: "none", access_path: "sponsored_grant" }
-    ],
-    expected_client_behavior: { action: "pay_and_verify", reason: "Pay to repair JSON." },
-    evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
-    challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
-    links: { challenge: "/api/agent/json-repair", execute: "/api/agent/json-repair", docs: "/api/agent/manifest" }
-};
-
-const COMPRESSOR_PAID_SURFACE = {
-    surface_id: "skill:compressor:v1", path: "/api/agent/compressor", method: "POST", kind: "skill", action_type: "compress_text", payment_intent: "charge", deterministic: true, agent_readable: true,
-    accepted_payments: [
-        { asset: "SATS", amount: 30, settlement_rail: "l402", access_path: "direct_settlement" },
-        { asset: "FAUCET_CREDIT", amount: 1, settlement_rail: "faucet", access_path: "faucet" },
-        { asset: "GRANT_CREDIT", amount: 1, settlement_rail: "none", access_path: "sponsored_grant" }
-    ],
-    expected_client_behavior: { action: "pay_and_verify", reason: "Pay to compress text." },
-    evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
-    challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
-    links: { challenge: "/api/agent/compressor", execute: "/api/agent/compressor", docs: "/api/agent/manifest" }
-};
-
-const OMIKUJI_PAID_SURFACE = {
-    surface_id: "skill:omikuji:v1", path: "/api/agent/omikuji", method: "POST", kind: "skill", action_type: "omikuji_draw", payment_intent: "charge", deterministic: false, agent_readable: true,
-    accepted_payments: [
-        { asset: "SATS", amount: 10, settlement_rail: "l402", access_path: "direct_settlement" },
-        { asset: "FAUCET_CREDIT", amount: 1, settlement_rail: "faucet", access_path: "faucet" },
-        { asset: "GRANT_CREDIT", amount: 1, settlement_rail: "none", access_path: "sponsored_grant" }
-    ],
-    expected_client_behavior: { action: "pay_and_verify", reason: "Pay for a randomized omikuji draw." },
-    evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
-    challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
-    links: { challenge: "/api/agent/omikuji", execute: "/api/agent/omikuji", docs: "/api/agent/manifest" }
-};
 
 // 💧 Faucet API
 systemApp.all('/faucet', async (c) => {
@@ -107,7 +37,14 @@ return c.json({
                 { name: "compressor", url: "/api/agent/compressor", method: "POST", purpose: "skill", paid_surface_id: "skill:compressor:v1", agent_readable: true, expected_client_behavior: "pay_and_verify" },
                 { name: "omikuji", url: "/api/agent/omikuji", method: "POST", purpose: "custom_skill", paid_surface_id: "skill:omikuji:v1", agent_readable: true, expected_client_behavior: "pay_and_verify" }
             ]
-        }
+        },
+        paid_surface_manifest: {
+            schema_version: "ln_church.paid_surface_manifest.v0",
+            url: "/.well-known/ln-church-paid-surfaces.json",
+            standard_claim: "none",
+            profile_status: "ln_church_metadata_profile"
+        },
+        paid_surfaces: PAID_SURFACE_CATALOG,
     });
 });
 
@@ -172,17 +109,18 @@ systemApp.get('/manifest', (c) => {
             { id: "compressor", path: "/api/agent/compressor", method: "POST", price_estimate: "30 SATS" },
             { id: "corpus-replay", path: "/api/agent/benchmark/replay/{corpus_id}", method: "GET", purpose: "interop_corpus_replay", replay_type: "synthetic_from_corpus_v1" }
         ],
-        paid_surfaces: [
-            BENCHMARK_PING_PAID_SURFACE,
-            JSON_REPAIR_PAID_SURFACE,
-            COMPRESSOR_PAID_SURFACE,
-            OMIKUJI_PAID_SURFACE
-        ],
+        paid_surface_manifest: {
+            schema_version: "ln_church.paid_surface_manifest.v0",
+            url: "/.well-known/ln-church-paid-surfaces.json",
+            standard_claim: "none",
+            profile_status: "ln_church_metadata_profile"
+        },
+        paid_surfaces: PAID_SURFACE_CATALOG,
         paid_surface_profiles: [
             {
-                profile: "ln_church.v1",
+                profile: "ln_church.metadata.v1",
                 status: "native",
-                description: "Current LN Church provider-side descriptor and response profile."
+                description: "Current LN Church provider-side metadata profile. This is a descriptive metadata profile, not a settlement standard."
             },
             {
                 profile: "http402.generic",
@@ -287,6 +225,41 @@ systemApp.get('/observations', async (c) => {
         },
         items: result.items || [],
         disclaimer: result.disclaimer || "These are observed payment frictions under specific client/runtime conditions. They are not verdicts about endpoint correctness."
+    });
+});
+
+systemApp.get('/openapi-paid-surfaces', (c) => {
+    const paths: Record<string, any> = {};
+    for (const surface of PAID_SURFACE_CATALOG) {
+        const method = surface.method.toLowerCase();
+        if (!paths[surface.path]) paths[surface.path] = {};
+        paths[surface.path][method] = {
+            "x-ln-church-paid-surface": {
+                surface_id: surface.surface_id,
+                agent_readable: surface.agent_readable,
+                accepted_payments: surface.accepted_payments.map((p: any) => ({
+                    amount: p.amount,
+                    asset: p.asset,
+                    settlement_rail: p.settlement_rail
+                })),
+                expected_client_behavior: surface.expected_client_behavior,
+                receipt_schema_version: surface.receipt_schema_version
+            }
+        };
+    }
+    return c.json({
+        schema_version: "ln_church.openapi_paid_surface_extensions.v0",
+        description: "OpenAPI-compatible x-ln-church-paid-surface fragments. This is metadata only and not a payment protocol.",
+        paths
+    });
+});
+
+systemApp.get('/paid-surface-observation-draft', (c) => {
+    const baseUrl = `https://${c.env.MY_NODE_DOMAIN}`;
+    return c.json({
+        automatic_reporting: false,
+        instruction: "This is a public-safe draft payload. The server SDK does not automatically submit observations to LN Church Observatory.",
+        drafts: PAID_SURFACE_CATALOG.map((s: any) => buildProviderDeclaredObservationDraft(s, baseUrl))
     });
 });
 

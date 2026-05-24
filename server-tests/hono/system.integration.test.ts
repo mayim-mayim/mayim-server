@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import systemApp from '../../packages/hono/src/routes/system';
 import { MONZEN_CONFIG } from '../../packages/hono/src/core/config';
+import app from '../../packages/hono/src/index';
 
 describe('System Routes Integration (Benchmark-First)', () => {
     const mockEnv = {
@@ -124,7 +125,7 @@ describe('System Routes Integration (Benchmark-First)', () => {
         expect(json.paid_surface_profiles).toBeDefined();
         expect(Array.isArray(json.paid_surface_profiles)).toBe(true);
 
-        const lnChurch = json.paid_surface_profiles.find((p: any) => p.profile === "ln_church.v1");
+        const lnChurch = json.paid_surface_profiles.find((p: any) => p.profile === "ln_church.metadata.v1");
         expect(lnChurch.status).toBe("native");
 
         const l402 = json.paid_surface_profiles.find((p: any) => p.profile === "l402");
@@ -139,5 +140,69 @@ describe('System Routes Integration (Benchmark-First)', () => {
         const ap2 = json.paid_surface_profiles.find((p: any) => p.profile === "ap2_observation");
         expect(ap2.status).toBe("planned");
         expect(ap2.description).toContain("Not a settlement rail");
+    });
+});
+
+describe('Provider-Declared Manifest Emitter Integration', () => {
+    const mockEnv = {
+        FAUCET_SECRET: 'test-faucet-secret',
+        MACAROON_SECRET: 'test-macaroon-secret',
+        RECEIPT_KV: { get: async () => null, put: async () => undefined } as any,
+        MAIN_SHRINE_URL: 'http://mock-shrine.com',
+        MY_NODE_DOMAIN: 'mock-node.com'
+    };
+
+    test('Well-known paid surface manifest exposes provider-declared paid surfaces', async () => {
+        // app はルートの Hono インスタンス
+        const res = await app.request(new Request('http://localhost/.well-known/ln-church-paid-surfaces.json'), undefined, mockEnv);
+        const json = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(json.schema_version).toBe("ln_church.paid_surface_manifest.v0");
+        expect(json.manifest_type).toBe("provider_declared_paid_surfaces");
+        expect(json.standard_claim).toBe("none");
+        expect(json.profile_status).toBe("ln_church_metadata_profile");
+        expect(json.observability_policy.automatic_reporting).toBe(false);
+        expect(json.observability_policy.no_secret_material).toBe(true);
+        expect(Array.isArray(json.paid_surfaces)).toBe(true);
+        expect(json.paid_surfaces.length).toBeGreaterThanOrEqual(4);
+    });
+
+    test('/api/agent/manifest backward compatibility with manifest link', async () => {
+        const res = await systemApp.request(new Request('http://localhost/manifest'), undefined, mockEnv);
+        const json = await res.json();
+
+        expect(json.paid_surfaces).toBeDefined();
+        expect(json.paid_surface_manifest.url).toBe("/.well-known/ln-church-paid-surfaces.json");
+        expect(json.paid_surface_manifest.standard_claim).toBe("none");
+    });
+
+    test('OpenAPI paid surface extension exposes x-ln-church-paid-surface fragments', async () => {
+        const res = await systemApp.request(new Request('http://localhost/openapi-paid-surfaces'), undefined, mockEnv);
+        const json = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(json.schema_version).toBe("ln_church.openapi_paid_surface_extensions.v0");
+        expect(json.paths["/api/agent/benchmark/ping"].get["x-ln-church-paid-surface"]).toBeDefined();
+    });
+
+    test('Secrets are not leaked in manifest and OpenAPI extension', async () => {
+        const wellKnownRes = await app.request(new Request('http://localhost/.well-known/ln-church-paid-surfaces.json'), undefined, mockEnv);
+        const wellKnownText = await wellKnownRes.text();
+
+        const openapiRes = await systemApp.request(new Request('http://localhost/openapi-paid-surfaces'), undefined, mockEnv);
+        const openapiText = await openapiRes.text();
+
+        const checkSecrets = (text: string) => {
+            expect(text).not.toContain("FAUCET_SECRET");
+            expect(text).not.toContain("MACAROON_SECRET");
+            expect(text).not.toContain("TEST_GRANT_SECRET");
+            expect(text).not.toContain("Authorization");
+            expect(text).not.toContain("preimage");
+            expect(text).not.toContain("macaroonSecret");
+        };
+
+        checkSecrets(wellKnownText);
+        checkSecrets(openapiText);
     });
 });

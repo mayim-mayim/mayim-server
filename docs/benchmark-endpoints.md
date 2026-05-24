@@ -6,6 +6,11 @@ v1.7.0 以降、`GET /api/agent/benchmark/ping` は **Agent-Readable Paid Surfac
 
 ## 思想
 
+Paid Surface は決済標準ではなく、支払いが必要な API surface を AI agent が読める形に整理するための metadata profile です。
+
+HTTP 402 / L402 / x402 / MPP などの既存・外部の支払い方式を置き換えるものではありません。
+Provider が宣言する支払い条件、期待される client behavior、支払い後に確認すべき receipt evidence を、agent が判断前に読める形で記述するものです。
+
 Skill routes が「実用的な有料API」を提供するのに対し、Benchmark endpoints は「仕様準拠・支払い実行・証跡検証」を確認するためのものです。
 
 特に `benchmark:ping:v1` は、AIエージェントが以下を確認するための最小 paid surface です。
@@ -17,11 +22,13 @@ Skill routes が「実用的な有料API」を提供するのに対し、Benchma
 
 ## Discovery
 
-Benchmark paid surfaces は manifest から発見できます。
+Benchmark paid surfaces は以下の manifest エンドポイントから発見できます。
 
 ```http
 GET /api/agent/manifest
-````
+GET /.well-known/ln-church-paid-surfaces.json
+GET /api/agent/openapi-paid-surfaces
+```
 
 `paid_surfaces` には以下が含まれます。
 

@@ -66,7 +66,7 @@ In short:
 
 As of v1.7.0, `ln-church-server` can expose provider capabilities as **agent-readable paid surfaces**.
 
-A paid surface is not just a paywall. It is a machine-readable contract that tells agents:
+A paid surface is not just a paywall. It is a machine-readable descriptor that tells agents:
 
 - what endpoint is being sold,
 - which assets and settlement paths are accepted,
@@ -122,6 +122,26 @@ Paid requests can return:
 ```
 
 This lets agents avoid spending reasoning tokens on payment mechanics and instead delegate repetitive interpretation to their runtime.
+
+---
+
+## Provider-Declared Paid Surface Manifest
+
+**Paid Surface is a descriptive metadata profile, not a settlement standard.**
+
+It does not replace HTTP 402, L402, x402, MPP, or any payment rail.
+It only describes provider-declared payment requirements, expected client behavior, and receipt evidence in a form that autonomous agents can inspect before deciding whether to pay.
+
+This is provider-declared metadata for agent-readable paid APIs.
+
+
+Payment rails remain exactly as they are (L402 / x402 / MPP / faucet / grant etc.). The manifest simply helps autonomous agents discover what can be paid for, how to pay, and what execution receipt to verify, without needing to guess.
+
+- **Discovery:** `GET /.well-known/ln-church-paid-surfaces.json`
+- **OpenAPI Extension:** `GET /api/agent/openapi-paid-surfaces`
+
+**Observability & Safety:**
+The SDK **does not** automatically report or emit telemetry to the LN Church Observatory. Public-safe observation drafts can be generated optionally and explicitly by the provider, ensuring no secret material (raw receipts, macaroon secrets, grant secrets, or authorization headers) is ever exposed.
 
 ---
 

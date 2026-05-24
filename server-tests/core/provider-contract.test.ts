@@ -175,7 +175,7 @@ describe('Adapter Boundary (v1.7.1)', () => {
         surface: {
             surface_id: "benchmark:ping:v1",
             standard_profiles: [
-                { profile: "ln_church.v1", status: "native" },
+                { profile: "ln_church.metadata.v1", status: "native" },
                 { profile: "mpp", status: "planned" }
             ],
             raw: { originalChallenge: "test-data" },
@@ -185,9 +185,9 @@ describe('Adapter Boundary (v1.7.1)', () => {
         }
     };
 
-    test('1. default output remains unchanged for ln_church.v1', () => {
+    test('1. default output remains unchanged for ln_church.metadata.v1', () => {
         const defaultChallenge = payment402.buildPaidSurfaceChallenge(paidSurfaceReq);
-        const profiledChallenge = payment402.buildPaidSurfaceChallenge(paidSurfaceReq, { profile: "ln_church.v1" });
+        const profiledChallenge = payment402.buildPaidSurfaceChallenge(paidSurfaceReq, { profile: "ln_church.metadata.v1" });
         expect(profiledChallenge).toEqual(defaultChallenge);
     });
 
@@ -210,9 +210,9 @@ describe('Adapter Boundary (v1.7.1)', () => {
         expect(() => {
             payment402.buildPaidSurfaceChallenge(paidSurfaceReq, { 
                 profile: "mpp", 
-                mapper: lnChurchV1Mapper // mapper.profile は "ln_church.v1"
+                mapper: lnChurchV1Mapper // mapper.profile は "ln_church.metadata.v1"
             });
-        }).toThrow("Profile mismatch: requested mpp, mapper provides ln_church.v1");
+        }).toThrow("Profile mismatch: requested mpp, mapper provides ln_church.metadata.v1");
     });
 
     test('5. PaidSurfaceMetadata accepts raw/external_refs/standard_profiles additively', () => {

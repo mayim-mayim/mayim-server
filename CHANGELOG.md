@@ -2,6 +2,19 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.9.0] - 2026-05-24 Provider-Declared Paid Surface Manifest
+
+### Added
+- Added `/.well-known/ln-church-paid-surfaces.json` for provider-declared, agent-readable paid surface metadata.
+- Added OpenAPI-compatible `x-ln-church-paid-surface` fragments.
+- Added manifest links from `/api/agent/manifest`.
+- Added optional public-safe observation draft helper without automatic telemetry.
+
+### Safety
+- This is not a new payment protocol or settlement rail.
+- No automatic reporting to LN Church Observatory.
+- No secrets, payment proofs, authorization headers, macaroons, preimages, or raw receipts are exposed.
+
 ## [1.8.0] - 2026-05-14 (Seller-Side Observation Lookup)
 
 ### Added

@@ -1,3 +1,7 @@
+import { buildPaidSurfaceManifest } from '@ln-church/server';
+import { PAID_SURFACE_CATALOG } from './core/paid-surfaces';
+import { MONZEN_CONFIG } from './core/config';
+
 // src/index.ts
 import { Hono } from 'hono';
 import type { KVNamespace } from '@cloudflare/workers-types';
@@ -43,6 +47,24 @@ app.route('/api/agent/omikuji', omikujiApp);
 app.route('/api/agent/json-repair', jsonRepairApp);
 app.route('/api/agent/compressor', compressorApp);
 app.route('/api/agent/benchmark', benchmarkApp);
+
+app.get('/.well-known/ln-church-paid-surfaces.json', (c) => {
+    const manifest = buildPaidSurfaceManifest({
+        provider: {
+            domain: c.env.MY_NODE_DOMAIN || "unknown-domain",
+            node_role: "benchmark_provider",
+            sdk: { name: "@ln-church/server", version: MONZEN_CONFIG.VERSION }
+        },
+        paidSurfaces: PAID_SURFACE_CATALOG,
+        links: {
+            agent_manifest: "/api/agent/manifest",
+            openapi_extension: "/api/agent/openapi-paid-surfaces",
+            documentation: "/docs/benchmark-endpoints.md"
+        }
+    });
+    c.header('Cache-Control', 'public, max-age=300');
+    return c.json(manifest);
+});
 
 // ★ Cron (scheduled) を完全に削除し、標準のHonoエクスポートのみに！
 export default app;
