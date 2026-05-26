@@ -127,13 +127,10 @@ This lets agents avoid spending reasoning tokens on payment mechanics and instea
 
 ## Provider-Declared Paid Surface Manifest
 
-**Paid Surface is a descriptive metadata profile, not a settlement standard.**
+**Paid Surface is a descriptive metadata profile, not a new payment standard.**
 
-It does not replace HTTP 402, L402, x402, MPP, or any payment rail.
-It only describes provider-declared payment requirements, expected client behavior, and receipt evidence in a form that autonomous agents can inspect before deciding whether to pay.
-
-This is provider-declared metadata for agent-readable paid APIs.
-
+It does not replace HTTP 402, L402, x402, MPP, or any payment rail. Instead, it complements them by making provider-side expectations, accepted rails, expected client behavior, and receipt evidence explicit. 
+It describes provider-declared payment requirements in a form that autonomous agents can inspect before deciding whether to pay.
 
 Payment rails remain exactly as they are (L402 / x402 / MPP / faucet / grant etc.). The manifest simply helps autonomous agents discover what can be paid for, how to pay, and what execution receipt to verify, without needing to guess.
 
