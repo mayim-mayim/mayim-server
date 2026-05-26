@@ -4,8 +4,11 @@ Your API will be hit by autonomous agents.
 
 Can it issue 402 challenges, accept settlement, verify execution, and produce evidence — across L402, x402, and MPP?
 
-`ln-church-server` is a **provider-side starter** for building agent-facing paid APIs.  
+`ln-church-server` is a **provider-side starter** for building agent-facing paid APIs.
 It helps developers expose HTTP 402-compatible endpoints that autonomous agents can benchmark, pay, execute, and trace through the LN Church ecosystem.
+
+In the broader agentic commerce stack, `ln-church-server` helps providers participate in an observability and trust-evidence layer by exposing HTTP 402-compatible paid actions as inspectable, verifiable surfaces.
+
 It is the seller-side counterpart to `ln-church-agent`: while the agent decides how to pay, the server makes paid API surfaces explicit, inspectable, and verifiable.
 
 ## Core Doctrine
