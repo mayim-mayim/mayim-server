@@ -247,6 +247,54 @@ GET /api/agent/manifest
 
 The manifest includes `paid_surfaces`, accepted payment options, expected client behavior, and receipt schema metadata.
 
+
+---
+
+## Surface Preflight Provider Diagnostics
+
+`ln-church-server` can expose provider-side preflight hints so agents and operators can query Hon-den’s Surface Preflight Read Model before touching a paid surface.
+
+* **This is read-only**
+* **Not a recommendation**
+* **Not a verdict**
+* **Not payment proof**
+* **Does not execute payments**
+* **Unknown means unobserved, not unsafe**
+* **Final authority remains local runtime**
+* **No automatic telemetry or polling**
+
+This makes provider surfaces preflight-ready, but it does not make the server automatically depend on Hon-den at request time.
+
+**Helper Usage:**
+
+```ts
+import { ShrineClient } from "@ln-church/hono";
+
+const shrine = new ShrineClient("https://kari.mayim-mayim.com", "example.com");
+
+const card = await shrine.fetchSurfacePreflight({
+  targetUrl: "https://example.com/api/agent/json-repair",
+  method: "POST",
+  rail: "l402",
+  network: "lightning",
+  asset: "SATS",
+  authorizationScheme: "L402",
+  draftShape: "provider_declared_paid_surface"
+});
+```
+
+**Route Usage:**
+
+```bash
+curl "https://your-node.example/api/agent/preflight?path=/api/agent/json-repair"
+```
+
+**Manifest Usage:**
+
+* `/.well-known/ln-church-paid-surfaces.json`
+* `/api/agent/manifest`
+* `/api/agent/openapi-paid-surfaces`
+
 ---
 
 ## Paid Surface Diagnostics

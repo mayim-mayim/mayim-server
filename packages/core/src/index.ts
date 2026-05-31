@@ -162,6 +162,7 @@ export interface ExecutionReceipt {
   meta?: Record<string, any>;
 }
 // --- End v1.7.0 Types ---
+export * from './paid-surface-manifest';
 
 export interface ReceiptStore {
     checkAndStore(receiptId: string): Promise<boolean>;

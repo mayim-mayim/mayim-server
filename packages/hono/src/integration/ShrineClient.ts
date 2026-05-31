@@ -1,7 +1,7 @@
 // src/integration/ShrineClient.ts
 import { MONZEN_CONFIG } from '../core/config';
 
-// ★ 新規追加: InteropCorpusItem の型定義
+// InteropCorpusItem の型定義
 export interface InteropCorpusItem {
     corpus_id: string;
     schema_version: "interop_corpus_item.v1";
@@ -36,6 +36,49 @@ export interface InteropCorpusItem {
         status_code_after_payment?: number;
     };
 }
+
+export type SurfacePreflightLookupOptions = {
+    surfaceKey?: string;
+    targetUrl?: string;
+    method?: string;
+    rail?: string;
+    network?: string;
+    asset?: string;
+    authorizationScheme?: string;
+    draftShape?: string;
+};
+
+export type SurfacePreflightReadModel = {
+    schema_version: "ln_church.surface_preflight_read_model.v1";
+    not_a_recommendation: boolean;
+    not_a_verdict: boolean;
+    surface?: {
+        known?: boolean;
+        surface_key?: string;
+        surface_id?: string;
+        target_domain?: string;
+        canonical_url?: string;
+        canonical_url_hash?: string;
+        method?: string;
+        rail?: string;
+        network?: string;
+        asset?: string;
+        authorization_scheme?: string;
+        draft_shape?: string;
+    };
+    observed_behavior?: Record<string, any>;
+    settlement_memory?: Record<string, any>;
+    evidence?: Record<string, any>;
+    failure_memory?: Record<string, any>;
+    freshness?: Record<string, any>;
+    guardrails?: {
+        final_authority?: string;
+        this_read_model_does_not_execute_payments?: boolean;
+        this_read_model_does_not_prove_settlement?: boolean;
+        do_not_treat_as_recommendation?: boolean;
+    };
+    limitations?: string[];
+};
 
 export class ShrineClient {
     private mainShrineUrl: string;
@@ -178,6 +221,56 @@ export class ShrineClient {
             return null; // 通信失敗時も throw せず null を返す
         }
     }
+
+    /**
+     * 🔍 Fetch Surface Preflight Read Model
+     * 本殿の観測済み memory を読み出します。支払い実行は行いません。
+     */
+    async fetchSurfacePreflight(options: SurfacePreflightLookupOptions): Promise<SurfacePreflightReadModel | null> {
+        if (!options.surfaceKey && !options.targetUrl) {
+            throw new Error("Either surfaceKey or targetUrl must be provided for preflight lookup.");
+        }
+        if (options.surfaceKey && options.targetUrl) {
+            throw new Error("Provide either surfaceKey or targetUrl, not both.");
+        }
+
+        const params = new URLSearchParams();
+        if (options.surfaceKey) params.append('surface_key', options.surfaceKey);
+        if (options.targetUrl) {
+            params.append('target_url', options.targetUrl);
+            params.append('method', (options.method || 'GET').toUpperCase());
+            if (options.rail) params.append('rail', options.rail);
+            if (options.network) params.append('network', options.network);
+            if (options.asset) params.append('asset', options.asset);
+            if (options.authorizationScheme) params.append('authorization_scheme', options.authorizationScheme);
+            if (options.draftShape) params.append('draft_shape', options.draftShape);
+        }
+
+        const url = `${this.mainShrineUrl}/api/agent/monzen/surface-preflight?${params.toString()}`;
+        
+        try {
+            const res = await fetch(url);
+            if (!res.ok) {
+                return null;
+            }
+            const data = await res.json() as SurfacePreflightReadModel;
+
+            if (data.schema_version !== "ln_church.surface_preflight_read_model.v1") return null;
+            if (data.not_a_recommendation !== true) return null;
+            if (data.not_a_verdict !== true) return null;
+            
+            const guardrails = data.guardrails || {};
+            if (guardrails.final_authority !== "local_runtime") return null;
+            if (guardrails.this_read_model_does_not_execute_payments === false) return null;
+            if (guardrails.this_read_model_does_not_prove_settlement === false) return null;
+
+            return data;
+        } catch (error) {
+            console.error(`[ShrineClient] Failed to fetch surface preflight:`, error);
+            return null;
+        }
+    }
+    
 }
 
 export type FailureObservationLookupOptions = {

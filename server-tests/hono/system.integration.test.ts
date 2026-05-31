@@ -158,7 +158,7 @@ describe('Provider-Declared Manifest Emitter Integration', () => {
         const json = await res.json();
 
         expect(res.status).toBe(200);
-        expect(json.schema_version).toBe("ln_church.paid_surface_manifest.v0");
+        expect(json.schema_version).toBe("ln_church.paid_surface_manifest.v1"); // ★修正: 新規拡張マニフェスト仕様(v1)に合わせて変更
         expect(json.manifest_type).toBe("provider_declared_paid_surfaces");
         expect(json.standard_claim).toBe("none");
         expect(json.profile_status).toBe("ln_church_metadata_profile");
@@ -204,5 +204,107 @@ describe('Provider-Declared Manifest Emitter Integration', () => {
 
         checkSecrets(wellKnownText);
         checkSecrets(openapiText);
+    });
+    test('Well-known paid surface manifest exposes provider-declared paid surfaces and preflight links', async () => {
+        const res = await app.request(new Request('http://localhost/.well-known/ln-church-paid-surfaces.json'), undefined, mockEnv);
+        const json = await res.json();
+
+        expect(res.status).toBe(200);
+        expect(json.schema_version).toBe("ln_church.paid_surface_manifest.v1"); // Now using v1
+        expect(json.observability_policy.automatic_reporting).toBe(false);
+        expect(json.observability_policy.no_secret_material).toBe(true);
+        
+        // Ensure Preflight links are present
+        expect(json.links.surface_preflight_diagnostics).toBe("/api/agent/preflight");
+        expect(json.links.surface_preflight_template).toBeDefined();
+        
+        // Ensure NO surface_keys are leaked at the top level
+        expect(json.surface_keys).toBeUndefined();
+    });
+
+    test('OpenAPI paid surface extension exposes preflight fragments', async () => {
+        const res = await systemApp.request(new Request('http://localhost/openapi-paid-surfaces'), undefined, mockEnv);
+        const json = await res.json();
+
+        const pingInfo = json.paths["/api/agent/benchmark/ping"].get["x-ln-church-paid-surface"];
+        
+        expect(pingInfo.surface_preflight).toBeDefined();
+        expect(pingInfo.preflight.diagnostics_endpoint).toBe("/api/agent/preflight");
+        expect(pingInfo.preflight.not_a_recommendation).toBe(true);
+        expect(pingInfo.preflight.not_a_verdict).toBe(true);
+    });
+
+    test('/paid-surface-observation-draft returns multi-option drafts safely', async () => {
+        const res = await systemApp.request(new Request('http://localhost/paid-surface-observation-draft'), undefined, mockEnv);
+        const json = await res.json();
+        
+        expect(json.automatic_reporting).toBe(false);
+        expect(json.instruction).toContain("does not automatically submit");
+        expect(Array.isArray(json.drafts)).toBe(true);
+        expect(json.drafts.length).toBeGreaterThan(0);
+        
+        // Check L402 draft mapping
+        const l402Draft = json.drafts.find((d: any) => d.protocol.rail === "l402");
+        expect(l402Draft).toBeDefined();
+        expect(l402Draft.protocol.network).toBe("lightning");
+        expect(l402Draft.protocol.authorization_scheme).toBe("L402");
+
+        // Ensure no secrets are leaked in drafts
+        const text = JSON.stringify(json);
+        expect(text).not.toContain("FAUCET_SECRET");
+        expect(text).not.toContain("MACAROON_SECRET");
+    });
+    // ============================================================
+    // 🛰️ マニフェスト拡張 & マルチオプション・ドラフト検証テスト (v1.10.0)
+    // ============================================================
+
+    test('Well-known paid surface manifest exposes provider-declared paid surfaces and preflight links', async () => {
+        const res = await app.request(new Request('http://localhost/.well-known/ln-church-paid-surfaces.json'), undefined, mockEnv);
+        expect(res.status).toBe(200);
+        
+        const json = await res.json();
+        // スキーマバージョンが v1 に拡張されていることを検証
+        expect(json.schema_version).toBe("ln_church.paid_surface_manifest.v1");
+        expect(json.observability_policy.automatic_reporting).toBe(false);
+        expect(json.observability_policy.no_secret_material).toBe(true);
+        
+        // プレフライト診断用URLが漏れなく含まれていることを検証
+        expect(json.links.surface_preflight_diagnostics).toBe("/api/agent/preflight");
+        expect(json.links.surface_preflight_template).toBeDefined();
+        
+        // パブリックなマニフェスト上に危険な surface_key 一覧が露出していないことを担保
+        expect(json.surface_keys).toBeUndefined();
+    });
+
+    test('OpenAPI paid surface extension exposes preflight fragments', async () => {
+        const res = await systemApp.request(new Request('http://localhost/openapi-paid-surfaces'), undefined, mockEnv);
+        const json = await res.json();
+
+        const pingSurfaceInfo = json.paths["/api/agent/benchmark/ping"].get["x-ln-church-paid-surface"];
+        expect(pingSurfaceInfo.surface_preflight).toBeDefined();
+        expect(pingSurfaceInfo.preflight.diagnostics_endpoint).toBe("/api/agent/preflight");
+        expect(pingSurfaceInfo.preflight.not_a_recommendation).toBe(true);
+    });
+
+    test('/paid-surface-observation-draft returns multi-option drafts safely without secret leak', async () => {
+        const res = await systemApp.request(new Request('http://localhost/paid-surface-observation-draft'), undefined, mockEnv);
+        expect(res.status).toBe(200);
+        
+        const json = await res.json();
+        expect(json.automatic_reporting).toBe(false);
+        expect(Array.isArray(json.drafts)).toBe(true);
+        expect(json.drafts.length).toBeGreaterThan(0);
+        
+        // L402のドラフトマッピングが正常に行われているか検証
+        const l402Draft = json.drafts.find((d: any) => d.protocol.rail === "l402");
+        expect(l402Draft).toBeDefined();
+        expect(l402Draft.protocol.network).toBe("lightning");
+        expect(l402Draft.protocol.authorization_scheme).toBe("L402");
+
+        // 下流のドラフト情報に秘密鍵やシークレットマテリアルが混入していないか厳密にスキャン
+        const textPayload = JSON.stringify(json);
+        expect(textPayload).not.toContain("FAUCET_SECRET");
+        expect(textPayload).not.toContain("MACAROON_SECRET");
+        expect(textPayload).not.toContain("private_key");
     });
 });

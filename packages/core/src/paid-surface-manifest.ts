@@ -1,4 +1,4 @@
-export type PaidSurfaceManifestSchemaVersion = "ln_church.paid_surface_manifest.v0";
+export type PaidSurfaceManifestSchemaVersion = "ln_church.paid_surface_manifest.v0" | "ln_church.paid_surface_manifest.v1";
 
 export interface PaidSurfaceManifestProvider {
     domain: string;
@@ -35,6 +35,23 @@ export interface PaidSurfaceDescriptor {
         schema_version?: string;
         required: string[];
     };
+    links?: {
+        challenge?: string;
+        execute?: string;
+        docs?: string;
+        preflight?: string;
+    };
+    surface_preflight?: {
+        supported: true;
+        lookup: "target_url";
+        schema_version: "ln_church.surface_preflight_read_model.v1";
+        endpoint: "/api/agent/preflight";
+        not_a_recommendation: true;
+        not_a_verdict: true;
+        not_payment_proof: true;
+        does_not_execute_payments: true;
+        final_authority: "local_runtime";
+    };
 }
 
 export interface PaidSurfaceManifest {
@@ -56,6 +73,8 @@ export interface PaidSurfaceManifest {
         agent_manifest?: string;
         openapi_extension?: string;
         documentation?: string;
+        surface_preflight_diagnostics?: string;
+        surface_preflight_template?: string;
     };
 }
 
@@ -65,7 +84,7 @@ export function buildPaidSurfaceManifest(input: {
     links?: PaidSurfaceManifest["links"];
 }): PaidSurfaceManifest {
     return {
-        schema_version: "ln_church.paid_surface_manifest.v0",
+        schema_version: "ln_church.paid_surface_manifest.v1",
         manifest_type: "provider_declared_paid_surfaces",
         generated_at: new Date().toISOString(),
         provider: input.provider,
@@ -84,15 +103,15 @@ export function buildPaidSurfaceManifest(input: {
 }
 
 export function buildProviderDeclaredObservationDraft(surface: any, baseUrl: string) {
-    return {
+    return buildProviderDeclaredObservationDrafts(surface, baseUrl)[0] ?? {
         source_scope: "provider_integrated",
         targetUrl: `${baseUrl}${surface.path}`,
         method: surface.method,
         statusCode: 402,
         protocol: {
-            rail: surface.accepted_payments?.[0]?.settlement_rail || "unknown",
+            rail: "unknown",
             network: "unknown",
-            asset: surface.accepted_payments?.[0]?.asset || "unknown",
+            asset: "unknown",
             authorization_scheme: "unknown",
             draft_shape: "provider_declared_paid_surface",
             payment_intent: surface.payment_intent || "charge",
@@ -104,6 +123,71 @@ export function buildProviderDeclaredObservationDraft(surface: any, baseUrl: str
             payment_performed: false,
             payment_receipt_present: false
         },
-        settlement_options_summary: surface.accepted_payments
+        settlement_options_summary: surface.accepted_payments || [],
+        not_a_recommendation: true,
+        not_a_verdict: true,
+        not_payment_proof: true
     };
+}
+
+export function buildProviderDeclaredObservationDrafts(surface: any, baseUrl: string) {
+    if (!surface.accepted_payments || !Array.isArray(surface.accepted_payments)) {
+        return [];
+    }
+
+    return surface.accepted_payments.map((payment: any) => {
+        let normalizedRail = "unknown";
+        let inferredNetwork = "unknown";
+        let inferredAuthorizationScheme = "unknown";
+
+        const inputRail = (payment.settlement_rail || "").toLowerCase();
+
+        if (inputRail === "l402") {
+            normalizedRail = "l402";
+            inferredNetwork = "lightning";
+            inferredAuthorizationScheme = "L402";
+        } else if (inputRail === "mpp") {
+            normalizedRail = "mpp";
+            inferredNetwork = "lightning";
+            inferredAuthorizationScheme = "MPP";
+        } else if (inputRail === "x402") {
+            normalizedRail = "x402";
+            inferredNetwork = (payment as any).network || "unknown"; // ★ここを (payment as any) に修正
+            inferredAuthorizationScheme = "x402";
+        } else if (inputRail === "faucet") {
+            normalizedRail = "faucet";
+            inferredNetwork = "none";
+            inferredAuthorizationScheme = "faucet";
+        } else if (inputRail === "none" || inputRail === "grant" || (payment as any).access_path === "sponsored_grant") {
+            normalizedRail = "none";
+            inferredNetwork = "none";
+            inferredAuthorizationScheme = "grant";
+        }
+
+        return {
+            source_scope: "provider_integrated",
+            targetUrl: `${baseUrl}${surface.path}`,
+            method: surface.method,
+            statusCode: 402,
+            protocol: {
+                rail: normalizedRail,
+                network: inferredNetwork,
+                asset: payment.asset || "unknown",
+                authorization_scheme: inferredAuthorizationScheme,
+                draft_shape: "provider_declared_paid_surface",
+                payment_intent: surface.payment_intent || "charge",
+                payment_method: "provider_declared"
+            },
+            evidence: {
+                evidence_class: "deterministic_provider",
+                verification_status: "unverified",
+                payment_performed: false,
+                payment_receipt_present: false
+            },
+            settlement_options_summary: surface.accepted_payments,
+            not_a_recommendation: true,
+            not_a_verdict: true,
+            not_payment_proof: true
+        };
+    });
 }

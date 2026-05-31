@@ -59,8 +59,10 @@ app.get('/.well-known/ln-church-paid-surfaces.json', (c) => {
         links: {
             agent_manifest: "/api/agent/manifest",
             openapi_extension: "/api/agent/openapi-paid-surfaces",
-            documentation: "/docs/benchmark-endpoints.md"
-        }
+            documentation: "/docs/benchmark-endpoints.md",
+            surface_preflight_diagnostics: "/api/agent/preflight",
+            surface_preflight_template: "https://kari.mayim-mayim.com/api/agent/monzen/surface-preflight?target_url={target_url}&method={method}&rail={rail}&network={network}&asset={asset}&authorization_scheme={authorization_scheme}&draft_shape={draft_shape}"
+        } as any
     });
     c.header('Cache-Control', 'public, max-age=300');
     return c.json(manifest);

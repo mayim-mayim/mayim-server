@@ -3,7 +3,7 @@ import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { ShrineClient } from '../integration/ShrineClient';
 import { MONZEN_CONFIG } from '../core/config';
 import { PAID_SURFACE_CATALOG } from '../core/paid-surfaces';
-import { buildProviderDeclaredObservationDraft } from '@ln-church/server';
+import { buildProviderDeclaredObservationDraft, buildProviderDeclaredObservationDrafts } from '@ln-church/server';
 
 type Bindings = {
     FAUCET_SECRET: string;
@@ -39,7 +39,7 @@ return c.json({
             ]
         },
         paid_surface_manifest: {
-            schema_version: "ln_church.paid_surface_manifest.v0",
+            schema_version: "ln_church.paid_surface_manifest.v1",
             url: "/.well-known/ln-church-paid-surfaces.json",
             standard_claim: "none",
             profile_status: "ln_church_metadata_profile"
@@ -109,8 +109,19 @@ systemApp.get('/manifest', (c) => {
             { id: "compressor", path: "/api/agent/compressor", method: "POST", price_estimate: "30 SATS" },
             { id: "corpus-replay", path: "/api/agent/benchmark/replay/{corpus_id}", method: "GET", purpose: "interop_corpus_replay", replay_type: "synthetic_from_corpus_v1" }
         ],
+        surface_preflight: {
+            supported: true,
+            diagnostics_endpoint: "/api/agent/preflight",
+            hon_den_schema_version: "ln_church.surface_preflight_read_model.v1",
+            lookup: ["target_url", "surface_key"],
+            not_a_recommendation: true,
+            not_a_verdict: true,
+            not_payment_proof: true,
+            does_not_execute_payments: true,
+            final_authority: "local_runtime"
+        },
         paid_surface_manifest: {
-            schema_version: "ln_church.paid_surface_manifest.v0",
+            schema_version: "ln_church.paid_surface_manifest.v1",
             url: "/.well-known/ln-church-paid-surfaces.json",
             standard_claim: "none",
             profile_status: "ln_church_metadata_profile"
@@ -243,7 +254,16 @@ systemApp.get('/openapi-paid-surfaces', (c) => {
                     settlement_rail: p.settlement_rail
                 })),
                 expected_client_behavior: surface.expected_client_behavior,
-                receipt_schema_version: surface.receipt_schema_version
+                receipt_schema_version: surface.receipt_schema_version,
+                surface_preflight: surface.surface_preflight,
+                preflight: {
+                    diagnostics_endpoint: "/api/agent/preflight",
+                    path_lookup: `/api/agent/preflight?path=${surface.path}`,
+                    schema_version: "ln_church.surface_preflight_read_model.v1",
+                    not_a_recommendation: true,
+                    not_a_verdict: true,
+                    not_payment_proof: true
+                }
             }
         };
     }
@@ -258,9 +278,148 @@ systemApp.get('/paid-surface-observation-draft', (c) => {
     const baseUrl = `https://${c.env.MY_NODE_DOMAIN}`;
     return c.json({
         automatic_reporting: false,
-        instruction: "This is a public-safe draft payload. The server SDK does not automatically submit observations to LN Church Observatory.",
-        drafts: PAID_SURFACE_CATALOG.map((s: any) => buildProviderDeclaredObservationDraft(s, baseUrl))
+        instruction: "This is a public-safe draft payload. The server SDK does not automatically submit observations to LN Church Observatory. 'drafts' supports multi-option preflight arrays.",
+        drafts: PAID_SURFACE_CATALOG.flatMap((s: any) => buildProviderDeclaredObservationDrafts(s, baseUrl)),
+        legacy_drafts: PAID_SURFACE_CATALOG.map((s: any) => buildProviderDeclaredObservationDraft(s, baseUrl))
     });
+});
+
+// 🔍 Surface Preflight Diagnostics (Seller-Side)
+systemApp.get('/preflight', async (c) => {
+    let surfaceKey = c.req.query('surface_key');
+    let targetUrl = c.req.query('url');
+    const path = c.req.query('path');
+
+    if (!surfaceKey && !targetUrl && !path) {
+        return c.json({
+            status: "error",
+            error_code: "INVALID_PARAMETER",
+            message: "Either 'surface_key', 'url', or 'path' query parameter is required."
+        }, 400);
+    }
+
+    if (path) {
+        if (!path.startsWith('/')) {
+            return c.json({ status: "error", message: "Path must start with /" }, 400);
+        }
+        targetUrl = `https://${c.env.MY_NODE_DOMAIN}${path}`;
+    }
+
+    if (targetUrl) {
+        try {
+            const parsed = new URL(targetUrl);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                return c.json({ status: "error", message: "Invalid URL protocol." }, 400);
+            }
+        } catch (e) {
+            return c.json({ status: "error", message: "Invalid URL format." }, 400);
+        }
+    }
+
+    if (surfaceKey) {
+        if (surfaceKey.startsWith('surface_')) surfaceKey = surfaceKey.replace('surface_', '');
+        if (!/^[a-fA-F0-9]{24}$/.test(surfaceKey)) {
+            return c.json({ status: "error", message: "Invalid surface_key format." }, 400);
+        }
+    }
+
+    let method = c.req.query('method') || "GET";
+    let rail = c.req.query('rail');
+    let network = c.req.query('network');
+    let asset = c.req.query('asset');
+    let authScheme = c.req.query('authorization_scheme');
+    let draftShape = c.req.query('draft_shape');
+
+    // Catalog Inference
+    if (path) {
+        const surface = PAID_SURFACE_CATALOG.find((s: any) => s.path === path);
+        if (surface) {
+            method = c.req.query('method') || surface.method;
+            if (surface.accepted_payments && surface.accepted_payments.length > 0) {
+                const payments = surface.accepted_payments;
+                const directOption = payments.find((p:any) => p.settlement_rail === "l402") 
+                    || payments.find((p:any) => p.settlement_rail === "x402")
+                    || payments.find((p:any) => p.settlement_rail === "mpp")
+                    || payments[0];
+                
+                const sRail = (directOption.settlement_rail || "").toLowerCase();
+                if (!rail) {
+                    if (sRail === "l402") rail = "l402";
+                    else if (sRail === "mpp") rail = "mpp";
+                    else if (sRail === "x402") rail = "x402";
+                }
+                if (!network) {
+                    if (sRail === "l402" || sRail === "mpp") network = "lightning";
+                    else network = (directOption as any).network || "unknown";
+                }
+                if (!asset) asset = directOption.asset || "unknown";
+                if (!authScheme) {
+                    if (sRail === "l402") authScheme = "L402";
+                    else if (sRail === "mpp") authScheme = "MPP";
+                    else if (sRail === "x402") authScheme = "x402";
+                }
+                if (!draftShape) draftShape = "provider_declared_paid_surface";
+            }
+        }
+    }
+
+    const shrineClient = new ShrineClient(c.env.MAIN_SHRINE_URL, c.env.MY_NODE_DOMAIN);
+    const preflight = await shrineClient.fetchSurfacePreflight({
+        surfaceKey,
+        targetUrl,
+        method,
+        rail,
+        network,
+        asset,
+        authorizationScheme: authScheme,
+        draftShape
+    });
+
+    if (!preflight) {
+        return c.json({
+            status: "success",
+            diagnostic_type: "seller_side_surface_preflight",
+            not_a_recommendation: true,
+            not_a_verdict: true,
+            not_payment_proof: true,
+            does_not_execute_payments: true,
+            final_authority: "local_runtime",
+            summary: {
+                known: false,
+                observation_count: 0
+            },
+            preflight: null,
+            disclaimer: "Failed to communicate with LN Church Hon-den or no preflight memory found. Unknown means unobserved, not unsafe."
+        }, 200);
+    }
+
+    return c.json({
+        status: "success",
+        diagnostic_type: "seller_side_surface_preflight",
+        source: "LN Church Hon-den Surface Preflight",
+        not_a_recommendation: true,
+        not_a_verdict: true,
+        not_payment_proof: true,
+        does_not_execute_payments: true,
+        final_authority: "local_runtime",
+        target: {
+            surface_key: surfaceKey || preflight.surface?.surface_key,
+            url: targetUrl || preflight.surface?.canonical_url,
+            path: path || undefined,
+            method: method.toUpperCase()
+        },
+        summary: {
+            known: preflight.surface?.known || false,
+            evidence_grade: preflight.evidence?.evidence_grade || "unknown",
+            observation_count: preflight.observed_behavior?.observation_count || 0,
+            recent_failure_count: preflight.failure_memory?.recent_failure_count || 0,
+            last_seen: preflight.freshness?.last_seen || null,
+            ttl_seconds: preflight.freshness?.ttl_seconds || 0,
+            volatility: preflight.freshness?.volatility || "unknown"
+        },
+        preflight: preflight,
+        disclaimer: "This is observed historical memory, not a recommendation, verdict, or payment proof. Final payment authority remains with the local runtime."
+    }, 200);
 });
 
 export default systemApp;

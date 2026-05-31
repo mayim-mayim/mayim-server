@@ -2,6 +2,26 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.10.0] - 2026-05-31 Surface Preflight Provider Diagnostics
+
+### Added
+- Added provider-side Surface Preflight hints to paid surface descriptors.
+- Added manifest links for Surface Preflight diagnostics and Hon-den target_url lookup template.
+- Added `ShrineClient.fetchSurfacePreflight()` for read-only seller-side preflight diagnostics.
+- Added `GET /api/agent/preflight` diagnostic route.
+- Added preflight metadata to OpenAPI paid surface fragments.
+- Added multi-option provider-declared observation draft generation.
+
+### Safety
+- No payment execution behavior changed.
+- No automatic preflight middleware.
+- No automatic telemetry or polling.
+- No recommendation engine.
+- No trust verdict or settlement proof inference.
+- Unknown means unobserved, not unsafe.
+- Final payment authority remains local runtime policy.
+- No AP2 / ACP / APP / batch-settlement execution was added.
+
 ## [1.9.0] - 2026-05-24 Provider-Declared Paid Surface Manifest
 
 ### Added
