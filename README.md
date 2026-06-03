@@ -30,6 +30,16 @@ Instead, this starter structures the provider side as a clear machine-facing loo
 
 ---
 
+## Verification Reuse for Providers
+
+Don't make every agent re-verify your API shape from scratch.
+
+By emitting agent-readable paid surfaces and execution receipts,
+providers help downstream agents reuse verified payment and execution evidence.
+This reduces repeated inspection cost while preserving auditability through receipts, traces, and graph-backed observation.
+
+---
+
 ## What it does
 
 Most payment infrastructure helps providers charge.  
@@ -125,6 +135,9 @@ Paid requests can return:
 ```
 
 This lets agents avoid spending reasoning tokens on payment mechanics and instead delegate repetitive interpretation to their runtime.
+
+**Provider-Declared Intent Hints (v1.10.1)**
+`ln-church-server` v1.10.1 lets providers attach optional `intent_hints` to paid surface descriptors. These hints are provider-declared candidate metadata that help agents and Hon-den understand what a surface claims to be useful for. They are not taxonomy truth, recommendations, verdicts, routing decisions, trust scores, or payment proofs. The server SDK does not automatically report them to Hon-den.
 
 ---
 

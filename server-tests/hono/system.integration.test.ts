@@ -180,10 +180,17 @@ describe('Provider-Declared Manifest Emitter Integration', () => {
     test('OpenAPI paid surface extension exposes x-ln-church-paid-surface fragments', async () => {
         const res = await systemApp.request(new Request('http://localhost/openapi-paid-surfaces'), undefined, mockEnv);
         const json = await res.json();
+        const pingFragment = json.paths["/api/agent/benchmark/ping"].get["x-ln-church-paid-surface"];
 
         expect(res.status).toBe(200);
         expect(json.schema_version).toBe("ln_church.openapi_paid_surface_extensions.v0");
         expect(json.paths["/api/agent/benchmark/ping"].get["x-ln-church-paid-surface"]).toBeDefined();
+
+        expect(pingFragment.intent_hints).toBeDefined();
+        expect(pingFragment.intent_hints[0].category_id).toBe("runtime_validation");
+        expect(pingFragment.intent_hints[0].source).toBe("provider_declared");
+        expect(pingFragment.intent_hints[0].not_a_recommendation).toBe(true);
+
     });
 
     test('Secrets are not leaked in manifest and OpenAPI extension', async () => {
@@ -196,6 +203,13 @@ describe('Provider-Declared Manifest Emitter Integration', () => {
         const checkSecrets = (text: string) => {
             expect(text).not.toContain("FAUCET_SECRET");
             expect(text).not.toContain("MACAROON_SECRET");
+
+            expect(text).not.toContain("private_key");
+            expect(text).not.toContain("api_key");
+            expect(text).not.toContain("stable_category");
+            expect(text).not.toContain("trust_score");
+            expect(text).not.toContain("best_for");
+
             expect(text).not.toContain("TEST_GRANT_SECRET");
             expect(text).not.toContain("Authorization");
             expect(text).not.toContain("preimage");

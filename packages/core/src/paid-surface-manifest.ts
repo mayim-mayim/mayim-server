@@ -9,6 +9,74 @@ export interface PaidSurfaceManifestProvider {
     };
 }
 
+export interface ProviderDeclaredIntentHint {
+    namespace?: "ln_church.agent_intent.experimental" | string;
+    taxonomy_version?: "agent_intent_taxonomy.v0" | string;
+    category_id: string;
+    source: "provider_declared";
+    confidence?: number;
+    confidence_method?: "provider_declared" | string;
+    status?: "observed" | "candidate" | "provisional" | "stable" | "deprecated";
+    classification_basis?: string[];
+    not_a_recommendation: true;
+    not_a_verdict: true;
+}
+
+const ALLOWED_INTENT_HINT_STATUSES = new Set([
+    "observed",
+    "candidate",
+    "provisional",
+    "stable",
+    "deprecated"
+]);
+
+export function normalizeProviderDeclaredIntentHint(hint: any): ProviderDeclaredIntentHint | null {
+    if (!hint || typeof hint !== "object") return null;
+
+    const categoryId = typeof hint.category_id === "string" ? hint.category_id.trim() : "";
+    
+    // category_id が無い、または不正なフォーマットの場合はドロップする
+    if (!/^[a-z][a-z0-9_:-]{1,127}$/.test(categoryId)) {
+        return null;
+    }
+
+    const rawStatus = typeof hint.status === "string" && ALLOWED_INTENT_HINT_STATUSES.has(hint.status)
+        ? hint.status
+        : "candidate";
+
+    // プロバイダー宣言の 'stable' は安全のため 'candidate' にダウングレード
+    const status = rawStatus === "stable" ? "candidate" : rawStatus as ProviderDeclaredIntentHint["status"];
+
+    // ホワイトリスト形式で新しいオブジェクトを構築（未知のフィールドを捨てる）
+    const normalized: ProviderDeclaredIntentHint = {
+        namespace: typeof hint.namespace === "string" ? hint.namespace : "ln_church.agent_intent.experimental",
+        taxonomy_version: typeof hint.taxonomy_version === "string" ? hint.taxonomy_version : "agent_intent_taxonomy.v0",
+        category_id: categoryId,
+        source: "provider_declared",
+        status,
+        not_a_recommendation: true,
+        not_a_verdict: true
+    };
+
+    if (typeof hint.confidence === "number" && Number.isFinite(hint.confidence)) {
+        normalized.confidence = Math.max(0, Math.min(1, hint.confidence));
+    }
+
+    if (typeof hint.confidence_method === "string") {
+        normalized.confidence_method = hint.confidence_method;
+    }
+
+    if (Array.isArray(hint.classification_basis)) {
+        normalized.classification_basis = hint.classification_basis
+            .filter((x: any) => typeof x === "string")
+            .map((x: string) => x.trim())
+            .filter(Boolean)
+            .slice(0, 20); // 最大20件に制限
+    }
+
+    return normalized;
+}
+
 export interface PaidSurfaceDescriptor {
     surface_id: string;
     path: string;
@@ -52,6 +120,7 @@ export interface PaidSurfaceDescriptor {
         does_not_execute_payments: true;
         final_authority: "local_runtime";
     };
+    intent_hints?: ProviderDeclaredIntentHint[];
 }
 
 export interface PaidSurfaceManifest {
@@ -83,6 +152,17 @@ export function buildPaidSurfaceManifest(input: {
     paidSurfaces: any[];
     links?: PaidSurfaceManifest["links"];
 }): PaidSurfaceManifest {
+
+    const normalizedSurfaces = (input.paidSurfaces || []).map(surface => {
+        const result = { ...surface };
+        if (Array.isArray(result.intent_hints)) {
+            result.intent_hints = result.intent_hints
+                .map(normalizeProviderDeclaredIntentHint)
+                .filter(Boolean); // null (不正フォーマット) を除去
+        }
+        return result;
+    });
+
     return {
         schema_version: "ln_church.paid_surface_manifest.v1",
         manifest_type: "provider_declared_paid_surfaces",
@@ -97,7 +177,7 @@ export function buildPaidSurfaceManifest(input: {
             automatic_reporting: false,
             provider_declared: true
         },
-        paid_surfaces: input.paidSurfaces,
+        paid_surfaces: normalizedSurfaces,
         links: input.links
     };
 }

@@ -2,6 +2,22 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.10.1] - 2026-06-03 Provider-Declared Intent Hints
+
+### Added
+- Added optional provider-declared `intent_hints` to `PaidSurfaceDescriptor`.
+- Added built-in catalog examples for benchmark, json-repair, compressor, and omikuji surfaces.
+- Exposed `intent_hints` through paid surface manifest and OpenAPI paid surface fragments.
+
+### Safety
+- No payment execution behavior changed.
+- No automatic telemetry or polling.
+- No stable taxonomy.
+- `category_id` is a provider-declared candidate claim, not taxonomy truth.
+- No recommendation, ranking, score, routing, trust verdict, or payment proof.
+- No Hon-den submission from Server SDK.
+- No secrets, authorization headers, macaroons, preimages, payment signatures, raw receipts, or private keys are exposed.
+
 ## [1.10.0] - 2026-05-31 Surface Preflight Provider Diagnostics
 
 ### Added

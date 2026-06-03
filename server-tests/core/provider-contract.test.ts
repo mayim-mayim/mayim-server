@@ -7,6 +7,7 @@ import {
     UnsupportedStandardProfileError,
     PaidSurfaceChallenge 
 } from '../../packages/core/src/index';
+import { buildPaidSurfaceManifest } from '../../packages/core/src/index';
 
 describe('Payment402 Canonical Provider Contract', () => {
     // モック用のVerifier（今回はヘッダーテストなので空でOK）
@@ -220,5 +221,73 @@ describe('Adapter Boundary (v1.7.1)', () => {
         expect(challenge.surface?.standard_profiles).toBeDefined();
         expect(challenge.surface?.raw?.originalChallenge).toBe("test-data");
         expect(challenge.surface?.external_refs?.[0].profile).toBe("mpp");
+    });    
+});
+
+describe('Intent Hints Manifest Normalization', () => {
+    test('buildPaidSurfaceManifest safely normalizes intent_hints and downgrades stable status', () => {
+        const mockSurfaces = [{
+            surface_id: "test:surface",
+            intent_hints: [{
+                category_id: "test_category",
+                source: "user_input", // 不正なsource
+                status: "stable",     // ダウングレード対象
+                not_a_recommendation: false // 強制書き換え対象
+            }]
+        }];
+
+        const manifest = buildPaidSurfaceManifest({
+            provider: { domain: "test.com" },
+            paidSurfaces: mockSurfaces
+        });
+
+        const hint = manifest.paid_surfaces[0].intent_hints![0];
+        expect(manifest.schema_version).toBe("ln_church.paid_surface_manifest.v1");
+        expect(hint.category_id).toBe("test_category");
+        expect(hint.source).toBe("provider_declared"); // 上書き検証
+        expect(hint.not_a_recommendation).toBe(true);    // 上書き検証
+        expect(hint.not_a_verdict).toBe(true);
+        expect(hint.status).toBe("candidate");           // ダウングレード検証
     });
+
+    test('intent_hints normalization drops unknown and secret-like fields', () => {
+        const manifest = buildPaidSurfaceManifest({
+            provider: { domain: "test.com" },
+            paidSurfaces: [{
+                surface_id: "test:surface",
+                path: "/test",
+                method: "GET",
+                agent_readable: true,
+                accepted_payments: [],
+                intent_hints: [{
+                    category_id: "company_profile_lookup",
+                    source: "user_input",
+                    status: "stable",
+                    // 危険な未知のフィールド
+                    private_key: "SECRET",
+                    api_key: "SECRET",
+                    authorization: "Bearer SECRET",
+                    raw_receipt: "SECRET",
+                    raw_prompt: "do something private"
+                }]
+            }]
+        });
+
+        const hint = manifest.paid_surfaces[0].intent_hints![0] as any;
+
+        // 正規化されるべき安全なフィールド
+        expect(hint.category_id).toBe("company_profile_lookup");
+        expect(hint.source).toBe("provider_declared");
+        expect(hint.status).toBe("candidate");
+        expect(hint.not_a_recommendation).toBe(true);
+        expect(hint.not_a_verdict).toBe(true);
+
+        // 未知の危険なフィールドが完全にドロップされていることを確認
+        expect(hint.private_key).toBeUndefined();
+        expect(hint.api_key).toBeUndefined();
+        expect(hint.authorization).toBeUndefined();
+        expect(hint.raw_receipt).toBeUndefined();
+        expect(hint.raw_prompt).toBeUndefined();
+    });
+
 });

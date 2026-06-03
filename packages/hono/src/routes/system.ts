@@ -3,7 +3,8 @@ import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { ShrineClient } from '../integration/ShrineClient';
 import { MONZEN_CONFIG } from '../core/config';
 import { PAID_SURFACE_CATALOG } from '../core/paid-surfaces';
-import { buildProviderDeclaredObservationDraft, buildProviderDeclaredObservationDrafts } from '@ln-church/server';
+import { buildProviderDeclaredObservationDraft, buildProviderDeclaredObservationDrafts, normalizeProviderDeclaredIntentHint } from '@ln-church/server';
+
 
 type Bindings = {
     FAUCET_SECRET: string;
@@ -244,6 +245,13 @@ systemApp.get('/openapi-paid-surfaces', (c) => {
     for (const surface of PAID_SURFACE_CATALOG) {
         const method = surface.method.toLowerCase();
         if (!paths[surface.path]) paths[surface.path] = {};
+        let intentHints = undefined;
+        if (Array.isArray((surface as any).intent_hints)) {
+            const normalized = (surface as any).intent_hints
+                .map(normalizeProviderDeclaredIntentHint)
+                .filter(Boolean);
+            if (normalized.length > 0) intentHints = normalized;
+        }
         paths[surface.path][method] = {
             "x-ln-church-paid-surface": {
                 surface_id: surface.surface_id,
@@ -256,6 +264,7 @@ systemApp.get('/openapi-paid-surfaces', (c) => {
                 expected_client_behavior: surface.expected_client_behavior,
                 receipt_schema_version: surface.receipt_schema_version,
                 surface_preflight: surface.surface_preflight,
+                ...(intentHints && { intent_hints: intentHints }),
                 preflight: {
                     diagnostics_endpoint: "/api/agent/preflight",
                     path_lookup: `/api/agent/preflight?path=${surface.path}`,

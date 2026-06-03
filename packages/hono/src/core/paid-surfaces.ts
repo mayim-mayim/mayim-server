@@ -36,6 +36,20 @@ export const BENCHMARK_PING_PAID_SURFACE = {
     challenge_schema_version: "ln_church.paid_surface_challenge.v1",
     receipt_schema_version: "ln_church.execution_receipt.v1",
     surface_preflight: SURFACE_PREFLIGHT_BLOCK,
+    intent_hints: [
+        {
+            namespace: "ln_church.agent_intent.experimental",
+            taxonomy_version: "agent_intent_taxonomy.v0",
+            category_id: "runtime_validation",
+            source: "provider_declared",
+            confidence: 0.6,
+            confidence_method: "provider_declared",
+            status: "candidate",
+            classification_basis: ["provider_surface_catalog", "action_type", "endpoint_purpose"],
+            not_a_recommendation: true,
+            not_a_verdict: true
+        }
+    ],
     links: {
         challenge: "/api/agent/benchmark/ping",
         execute: "/api/agent/benchmark/ping",
@@ -55,6 +69,7 @@ export const JSON_REPAIR_PAID_SURFACE = {
     evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
     challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
     surface_preflight: SURFACE_PREFLIGHT_BLOCK,
+    intent_hints: [{ category_id: "json_repair", source: "provider_declared", status: "candidate", not_a_recommendation: true, not_a_verdict: true }],
     links: { challenge: "/api/agent/json-repair", execute: "/api/agent/json-repair", docs: "/api/agent/manifest", preflight: "/api/agent/preflight?path=/api/agent/json-repair" }
 };
 
@@ -69,6 +84,7 @@ export const COMPRESSOR_PAID_SURFACE = {
     evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
     challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
     surface_preflight: SURFACE_PREFLIGHT_BLOCK,
+    intent_hints: [{ category_id: "text_compression", source: "provider_declared", status: "candidate", not_a_recommendation: true, not_a_verdict: true }],
     links: { challenge: "/api/agent/compressor", execute: "/api/agent/compressor", docs: "/api/agent/manifest", preflight: "/api/agent/preflight?path=/api/agent/compressor" }
 };
 
@@ -83,6 +99,7 @@ export const OMIKUJI_PAID_SURFACE = {
     evidence_schema: { schema_version: "ln_church.execution_receipt.v1", required: ["trace_id", "payment_status", "execution_status", "verification_status", "timestamp"] },
     challenge_schema_version: "ln_church.paid_surface_challenge.v1", receipt_schema_version: "ln_church.execution_receipt.v1",
     surface_preflight: SURFACE_PREFLIGHT_BLOCK,
+    intent_hints: [{ category_id: "randomized_content_generation", source: "provider_declared", status: "candidate", not_a_recommendation: true, not_a_verdict: true }],
     links: { challenge: "/api/agent/omikuji", execute: "/api/agent/omikuji", docs: "/api/agent/manifest", preflight: "/api/agent/preflight?path=/api/agent/omikuji" }
 };
 
