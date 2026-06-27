@@ -135,7 +135,7 @@ describe('System Routes Integration (Benchmark-First)', () => {
         expect(x402.status).toBe("planned");
 
         const mpp = json.paid_surface_profiles.find((p: any) => p.profile === "mpp");
-        expect(mpp.status).toBe("planned");
+        expect(mpp.status).toBe("experimental");
 
         const ap2 = json.paid_surface_profiles.find((p: any) => p.profile === "ap2_observation");
         expect(ap2.status).toBe("planned");

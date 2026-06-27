@@ -151,8 +151,8 @@ systemApp.get('/manifest', (c) => {
             },
             {
                 profile: "mpp",
-                status: "planned",
-                description: "Profile boundary reserved for future MPP metadata mapping. Not implemented as a verifier in this package."
+                status: "experimental",
+                description: "Experimental support for header parsing and basic hash shape check. Full amount/finality verification requires external node integration."
             },
             {
                 profile: "ap2_observation",

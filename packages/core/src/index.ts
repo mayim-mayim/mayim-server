@@ -597,3 +597,5 @@ export class Payment402 {
 }
 
 export * from './paid-surface-manifest';
+
+export * from './support-matrix';

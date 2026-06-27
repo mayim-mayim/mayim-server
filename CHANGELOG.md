@@ -2,6 +2,19 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.11.0] - 2026-06-27 Server Support Matrix & Capability Boundaries
+
+### Added
+- Added machine-readable server support matrix helper (`getServerSupportMatrix()`) in `@ln-church/server` core to explicitly expose provider-side capability states and boundaries to local runtimes.
+- Added strict boundary assertions in `server-tests/core/support-matrix.test.ts` to ensure raw protocol layers and sponsored access semantics remain unmixed.
+- Exported support matrix types and helpers from the public package index.
+
+### Safety & Alignment
+- No financial payment processing logic or verifier behaviors were changed.
+- Re-enforced product positioning: `ln-church-server` is an explicit, inspectable, and verifiable metadata/observability layer, not a settlement processor or wallet provider.
+- Confirmed that `x402` and `MPP` are marked as planned/mock boundaries, and `Grant` / `Faucet` are treated strictly as access paths with `settlement_rail: "none"`.
+- Guardrails against automatic telemetry and secret leakage remain fully intact.
+
 ## [1.10.1] - 2026-06-03 Provider-Declared Intent Hints
 
 ### Added

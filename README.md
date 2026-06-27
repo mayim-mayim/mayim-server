@@ -1,8 +1,13 @@
 # ln-church-server
 
+
+**The Value of "Not a Verdict"**
+LN Church read models do not decide for the agent. They preserve **observed memory**: what was seen, what was paid, what failed, what receipt shape appeared, what protocol role was observed, and what verification cost was reported. This is not a recommendation or verdict; it is a **reusable observation record** that helps the local runtime avoid re-verifying everything. Final payment authority remains local.
+
+
 Your API will be hit by autonomous agents.
 
-Can it issue 402 challenges, accept settlement, verify execution, and produce evidence — across L402, x402, and MPP?
+Can it issue 402 challenges, accept settlement, verify execution, and produce evidence — leveraging L402 natively, and providing structured metadata boundaries for MPP and x402?
 
 `ln-church-server` is a **provider-side starter** for building agent-facing paid APIs.
 It helps developers expose HTTP 402-compatible endpoints that autonomous agents can benchmark, pay, execute, and trace through the LN Church ecosystem.
@@ -49,7 +54,7 @@ Most payment infrastructure helps providers charge.
 
 It is designed for providers that must:
 - **Issue** HTTP 402 challenges formatted for autonomous agents.
-- **Support** L402, x402, MPP, or compatible settlement paths.
+- **Support** L402 (native), MPP (experimental headers), and define adapter boundaries for x402 or other compatible settlement paths.
 - **Verify** settlement evidence before executing protected actions.
 - **Return** receipts or verifiable responses after execution.
 - **Expose** benchmarkable endpoints for client interoperability testing.
@@ -65,7 +70,7 @@ Together, they reduce the reasoning burden of autonomous agents around paid API 
 |---|---|---|
 | `ln-church-agent` | Buyer-side runtime | Decide whether and how an agent should pay, execute, and verify an HTTP 402 flow |
 | `ln-church-server` | Provider-side runtime | Expose paid API capabilities as agent-readable surfaces with challenge, execution, and evidence metadata |
-| LN Church Sandbox | Observability layer | Collect benchmark, receipt, trace, and interop evidence from both sides |
+| LN Church Sandbox / Observatory | Collect benchmark, receipt, trace, and interop evidence from both sides |
 
 In short:
 
@@ -74,6 +79,23 @@ In short:
 - LN Church Sandbox makes the resulting behavior observable and comparable.
 
 ---
+
+## Support Matrix & Provider Boundaries
+
+**Important:** `ln-church-server` is **not a payment processor, wallet provider, or managed payment rail**. It is a reusable observed memory layer and provider-side starter designed to expose agent-readable paid surfaces and execution receipts.
+
+The following matrix clarifies what is actively verified by this package versus what is merely supported as a metadata boundary.
+
+| Capability / Rail | Type | Provider-Side Verifier | Manifest Metadata | Execution Receipt | Notes & Safety Boundaries |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **L402** | Settlement Rail | Implemented | Supported | Supported | Macaroon verification via `@ln-church/verifier-l402`. |
+| **MPP** | Settlement Rail | Mock/Basic | Supported | Supported | Basic hash check in `L402Verifier`. Full integration requires your node backend. |
+| **x402** | Settlement Rail | Planned | Planned | Supported | Adapter boundary only. No native verifier exists in this package yet. |
+| **Grant** | Access Path | Implemented | Supported | Supported | Sponsored/scoped access (`settlement_rail="none"`). **Not a settlement rail.** |
+| **Faucet** | Access Path | Implemented | Supported | Supported | Test/fallback access. **Not a financial settlement rail.** |
+| **AP2 / ACP** | Metadata Profile | Not Applicable | Planned | Not Applicable | Observation/metadata boundary only. Not executable settlement rails. |
+| **Surface Preflight** | Observability | Not Applicable | Supported | Not Applicable | Provider-declared metadata block. **Not a recommendation. A reusable observation record, trust proof, or verdict.** |
+
 
 ## Agent-Readable Paid Surfaces
 
@@ -268,8 +290,8 @@ The manifest includes `paid_surfaces`, accepted payment options, expected client
 `ln-church-server` can expose provider-side preflight hints so agents and operators can query Hon-den’s Surface Preflight Read Model before touching a paid surface.
 
 * **This is read-only**
-* **Not a recommendation**
-* **Not a verdict**
+* **Not a recommendation. A reusable observation record**
+* **Not a verdict. A reusable observation record**
 * **Not payment proof**
 * **Does not execute payments**
 * **Unknown means unobserved, not unsafe**
@@ -352,8 +374,11 @@ This server supports two distinct access models through a single, unified execut
 
 ### 1. Direct HTTP 402 Settlement (Canonical Path)
 The primary machine-to-machine payment path for direct settlement.
-* **Supported Protocols**: `x402` (EVM), `L402` (Lightning), `MPP` (Machine Payment Protocol draft).
-* **Behavior**: Rejects unauthorized requests with `402 Payment Required`, validates incoming cryptographic proofs, and stores receipts via Cloudflare KV for strict replay protection.
+* **Supported Protocols**: 
+  * `L402` (Lightning): Fully implemented verifier.
+  * `MPP` (Machine Payment Protocol draft): Experimental support for header parsing and basic hash shape checks. Full finality verification requires external node integration.
+  * `x402` (EVM/SVM): Supported as a planned metadata boundary. Emitting a provider-verified settlement receipt requires an external x402 verifier or adapter.
+* **Behavior**: Rejects unauthorized requests with `402 Payment Required`, validates incoming cryptographic proofs (where natively implemented), and stores receipts via Cloudflare KV for strict replay protection.
 
 ### 2. Sponsored Grant Override (Onboarding Layer)
 An experimental pre-payment access path for sponsor-funded execution.
