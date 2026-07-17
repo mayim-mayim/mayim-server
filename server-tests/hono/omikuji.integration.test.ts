@@ -1,10 +1,11 @@
 import { describe, test, expect, vi } from 'vitest';
 import omikujiApp from '../../packages/hono/src/routes/skills/omikuji';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
+import { InMemoryAtomicReplayStore } from '../../packages/core/src/payment-boundary';
 
 describe('Integration: Omikuji Route Provider Contract', () => {
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         TEST_GRANT_SECRET: 'test-secret-key',
         TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com',
         MACAROON_SECRET: 'test-macaroon-secret',
@@ -13,7 +14,8 @@ describe('Integration: Omikuji Route Provider Contract', () => {
             put: vi.fn().mockResolvedValue(undefined)
         } as any,
         MAIN_SHRINE_URL: 'http://mock-shrine.com',
-        MY_NODE_DOMAIN: 'mock-node.com'
+        MY_NODE_DOMAIN: 'mock-node.com',
+        get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); }
     };
 
     test('Unpaid Request -> 402 with canonical challenge headers', async () => {
@@ -21,9 +23,10 @@ describe('Integration: Omikuji Route Provider Contract', () => {
         const res = await omikujiApp.request(req, undefined, mockEnv);
 
         expect(res.status).toBe(402);
-        expect(res.headers.get('WWW-Authenticate')).toContain('Payment');
-        expect(res.headers.get('PAYMENT-REQUIRED')).toContain('network="lightning"');
-        expect(res.headers.get('x-402-payment-required')).toContain('price=10');
+        expect(res.headers.get('WWW-Authenticate')).toContain('Faucet');
+        expect(res.headers.get('WWW-Authenticate')).not.toContain('<fetch-via-hateoas>');
+        expect(res.headers.get('PAYMENT-REQUIRED')).toContain('network="none"');
+        expect(res.headers.get('x-402-payment-required')).toContain('amount_atomic=1');
 
         // ★ 追加: Paid Surface Challenge の検証
         const json = await res.json();
@@ -31,7 +34,8 @@ describe('Integration: Omikuji Route Provider Contract', () => {
         expect(json.surface.surface_id).toBe("skill:omikuji:v1");
         expect(json.surface.action_type).toBe("omikuji_draw");
         expect(json.surface.deterministic).toBe(false);
-        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(true);
+        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(false);
+        expect(json.accepted_payments.every((p: any) => p.canonical_requirement)).toBe(true);
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
     });
 
@@ -60,9 +64,11 @@ describe('Integration: Omikuji Route Provider Contract', () => {
         expect(json.execution_receipt.schema_version).toBe("ln_church.execution_receipt.v1");
         expect(json.execution_receipt.surface_id).toBe("skill:omikuji:v1");
         expect(json.execution_receipt.action_type).toBe("omikuji_draw");
-        expect(json.execution_receipt.payment_status).toBe("succeeded");
+        expect(json.execution_receipt.payment_status).toBe("sponsored");
         expect(json.execution_receipt.execution_status).toBe("completed");
         expect(json.execution_receipt.verification_status).toBe("verified");
         expect(json.execution_receipt.result.deterministic).toBe(false);
+        expect(json.execution_receipt.receipt_state.signature_verified).toBe(false);
+        expect(json.execution_receipt.receipt_state.settlement_verified).toBe(false);
     });
 });

@@ -1,9 +1,10 @@
 import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
 import benchmarkApp from '../../packages/hono/src/routes/benchmark';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
+import { InMemoryAtomicReplayStore } from '@ln-church/server';
 
 const mockEnv = {
-    FAUCET_SECRET: 'test-faucet-secret',
+    FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     TEST_GRANT_SECRET: 'test-secret-key',
     TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com', 
     MACAROON_SECRET: 'test-macaroon-secret',
@@ -11,6 +12,7 @@ const mockEnv = {
         get: async () => null,
         put: async () => undefined
     } as any,
+    get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
     MAIN_SHRINE_URL: 'http://mock-shrine.com',
     MY_NODE_DOMAIN: 'mock-node.com'
 };
@@ -27,7 +29,7 @@ async function createMockGrant(claims: any, secret: string) {
 
 describe('Benchmark Suite Integration', () => {
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         TEST_GRANT_SECRET: 'test-secret-key',
         TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com', 
         MACAROON_SECRET: 'test-macaroon-secret',
@@ -35,6 +37,7 @@ describe('Benchmark Suite Integration', () => {
             get: async () => null,
             put: async () => undefined
         } as any,
+        get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
         MY_NODE_DOMAIN: 'mock-node.com'
     };
 
@@ -67,14 +70,55 @@ describe('Benchmark Suite Integration', () => {
         expect(json.surface.surface_id).toBe("benchmark:ping:v1");
         expect(json.surface.action_type).toBe("benchmark_ping");
         
-        expect(json.accepted_payments.length).toBeGreaterThanOrEqual(3);
-        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(true);
+        // An unavailable L402 issuer must be omitted instead of advertising an
+        // unexecutable placeholder challenge.
+        expect(json.accepted_payments).toHaveLength(2);
+        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(false);
         expect(json.accepted_payments.some((p: any) => p.asset === "FAUCET_CREDIT")).toBe(true);
         expect(json.accepted_payments.some((p: any) => p.asset === "GRANT_CREDIT")).toBe(true);
+        expect(json.accepted_payments.every((p: any) => p.canonical_requirement)).toBe(true);
         
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
         expect(json.evidence.required).toContain("trace_id");
         expect(json.instruction_for_agents.next_request_schema).toBeDefined();
+    });
+
+    test('GET /ping without atomic replay wiring -> 503 and no payment challenge', async () => {
+        const envWithoutReplay = {
+            FAUCET_SECRET: mockEnv.FAUCET_SECRET,
+            TEST_GRANT_SECRET: mockEnv.TEST_GRANT_SECRET,
+            TRUSTED_GRANT_ISSUERS: mockEnv.TRUSTED_GRANT_ISSUERS,
+            MACAROON_SECRET: mockEnv.MACAROON_SECRET,
+            RECEIPT_KV: mockEnv.RECEIPT_KV,
+            MY_NODE_DOMAIN: mockEnv.MY_NODE_DOMAIN
+        };
+
+        const res = await benchmarkApp.request(
+            new Request('http://localhost/ping'),
+            undefined,
+            envWithoutReplay
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(503);
+        expect(json.error_code).toBe('PAYMENT_CONFIGURATION_ERROR');
+        expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+        expect(res.headers.get('WWW-Authenticate')).toBeNull();
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+    });
+
+    test('GET /ping omits Faucet when its verifier secret is not configured', async () => {
+        const res = await benchmarkApp.request(
+            new Request('http://localhost/ping'),
+            undefined,
+            { ...mockEnv, FAUCET_SECRET: '' }
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(402);
+        expect(json.accepted_payments).toHaveLength(1);
+        expect(json.accepted_payments[0].asset).toBe('GRANT_CREDIT');
+        expect(JSON.stringify(json)).not.toContain('FAUCET_CREDIT');
     });
 
     // 象限2: Paid Ping (強化版)
@@ -103,9 +147,17 @@ describe('Benchmark Suite Integration', () => {
         expect(json.execution_receipt.schema_version).toBe("ln_church.execution_receipt.v1");
         expect(json.execution_receipt.surface_id).toBe("benchmark:ping:v1");
         expect(json.execution_receipt.action_type).toBe("benchmark_ping");
-        expect(json.execution_receipt.payment_status).toBe("succeeded");
+        expect(json.execution_receipt.payment_status).toBe("sponsored");
         expect(json.execution_receipt.execution_status).toBe("completed");
         expect(json.execution_receipt.verification_status).toBe("verified");
+        expect(json.execution_receipt.receipt_format).toBe("unsigned_base64json");
+        expect(json.execution_receipt.receipt_state).toEqual({
+            present: true,
+            server_asserted: true,
+            signature_verified: false,
+            settlement_verified: false,
+            delivered: true
+        });
         expect(json.execution_receipt.result.deterministic).toBe(true);
         expect(json.execution_receipt.timestamp).toBeDefined();
     });
@@ -221,7 +273,7 @@ describe('Corpus Replay Endpoints (Synthetic)', () => {
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
     });
 
-    test('GET /replay/:corpus_id/challenge returns strong pay_and_verify (402 challenge)', async () => {
+    test('GET /replay/:corpus_id/challenge marks strong corpus replay as non-executable', async () => {
         const mockCorpus = {
             corpus_id: "corp_strong",
             quality: "strong",
@@ -236,7 +288,10 @@ describe('Corpus Replay Endpoints (Synthetic)', () => {
         const json = await res.json();
 
         expect(res.status).toBe(402);
-        expect(res.headers.get('WWW-Authenticate')).toContain('L402 macaroon');
+        expect(res.headers.get('WWW-Authenticate')).toBe('SyntheticReplay executable="false"');
+        expect(res.headers.get('WWW-Authenticate')).not.toContain('L402');
+        expect(JSON.stringify(json)).not.toContain('placeholder');
+        expect(json.executable).toBe(false);
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
     });
 

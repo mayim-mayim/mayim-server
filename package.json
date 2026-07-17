@@ -6,9 +6,10 @@
   "packages/verifiers/*",
   "examples/*"
  ],
- "scripts": {
-  "build": "npm run build --workspaces --if-present",
-  "test": "vitest run",
+  "scripts": {
+    "build": "npm run build --workspace @ln-church/server && npm run build --workspace @ln-church/verifier-faucet --workspace @ln-church/verifier-grant --workspace @ln-church/verifier-l402 && npm run build --workspace @ln-church/hono",
+    "pretest": "npm run build",
+    "test": "vitest run",
   "test:watch": "vitest"
  },
  "devDependencies": {

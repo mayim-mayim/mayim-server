@@ -37,10 +37,10 @@ export function getServerSupportMatrix(): ServerSupportMatrix {
             {
                 name: "MPP",
                 type: "settlement_rail",
-                provider_side_verifier: "experimental",
+                provider_side_verifier: "planned",
                 manifest_metadata: "supported",
-                execution_receipt: "supported",
-                notes: "Basic header parsing and preimage hash check implemented. Full amount/finality verification requires external Lightning node integration."
+                execution_receipt: "schema_only",
+                notes: "Metadata boundary only in this build. No executable MPP verifier is advertised until amount, canonical requirement, and finality verification are supplied by an external adapter."
             },
             {
                 name: "x402",

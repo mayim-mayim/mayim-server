@@ -3,8 +3,10 @@ import { GrantVerifier } from '../../packages/verifiers/grant/src/index';
 
 // テスト用のダミーJWSトークンを生成するヘルパー関数
 function createMockToken(claims: any) {
-    const header = btoa(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: "test" }));
-    const payload = btoa(JSON.stringify(claims));
+    const header = btoa(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: "test" }))
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const payload = btoa(JSON.stringify(claims))
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
     const signature = "dummy_signature";
     return `${header}.${payload}.${signature}`;
 }
@@ -21,7 +23,9 @@ describe('GrantVerifier Strict Validation', () => {
         sub: 'agent123',
         aud: 'https://kari.mayim-mayim.com',
         jti: 'grant_001',
+        iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + 3600, // 1時間後
+        grant_type: 'api_access',
         asset: 'GRANT_CREDIT',
         amount: 1,
         scope: { routes: ['/api/agent/omikuji'], methods: ['POST'] }
@@ -73,5 +77,30 @@ describe('GrantVerifier Strict Validation', () => {
 
         expect(result.isValid).toBe(false);
         expect(result.error).toContain("missing exp");
+    });
+
+    it('浮動小数点amountは署名検証前にfail closedになること', async () => {
+        const verifier = new GrantVerifier(mockOptions);
+        const claims = { ...baseClaims, amount: 1.5 };
+        const req = { headers: new Map([['Authorization', `Grant ${createMockToken(claims)}`]]) };
+
+        const result = await verifier.verify(req);
+
+        expect(result.isValid).toBe(false);
+        expect(result.error).toContain("positive safe integer");
+    });
+
+    it('未知のJWS algは署名検証前にfail closedになること', async () => {
+        const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }))
+            .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+        const payload = btoa(JSON.stringify(baseClaims))
+            .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+        const req = { headers: new Map([['Authorization', `Grant ${header}.${payload}.dummy`]]) };
+        const verifier = new GrantVerifier(mockOptions);
+
+        const result = await verifier.verify(req);
+
+        expect(result.isValid).toBe(false);
+        expect(result.error).toContain("alg is unsupported");
     });
 });

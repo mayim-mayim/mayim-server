@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { ShrineClient } from '../../integration/ShrineClient';
-import { getPayment402 } from '../../core/payment';
-import type { PaidSurfaceRequirement } from '@ln-church/server';
+import { getPayment402, preparePaymentRequirements } from '../../core/payment';
+import { encodeUnsignedBase64Json, type PaidSurfaceRequirement } from '@ln-church/server';
 
 type Bindings = { FAUCET_SECRET: string; MACAROON_SECRET: string; RECEIPT_KV: KVNamespace; MAIN_SHRINE_URL: string; MY_NODE_DOMAIN: string; };
 
@@ -38,7 +38,9 @@ const OMIKUJI_REQUIREMENTS: PaidSurfaceRequirement[] = [
 
 omikujiApp.post('/', async (c) => {
     const payment402 = getPayment402(c);
-    const authResult = await payment402.verify(c.req.raw, OMIKUJI_REQUIREMENTS);
+    const prepared = await preparePaymentRequirements(c, payment402, OMIKUJI_REQUIREMENTS);
+    if (prepared instanceof Response) return prepared;
+    const authResult = await payment402.verify(c.req.raw, prepared.requirements);
 
     if (!authResult.isValid) {
         const agentId = c.req.header('x-agent-id') || 'unknown';
@@ -56,21 +58,21 @@ omikujiApp.post('/', async (c) => {
         }
 
         return c.json(
-            payment402.buildPaidSurfaceChallenge(OMIKUJI_REQUIREMENTS), 
+            payment402.buildPaidSurfaceChallenge(prepared.requirements),
             402, 
-            payment402.buildChallengeHeaders(OMIKUJI_REQUIREMENTS)
+            payment402.buildChallengeHeaders(prepared.requirements)
         );
     }
 
-    const receiptData = { txHash: authResult.payload?.receiptId || "N/A", ritual: "OMIKUJI", timestamp: Date.now(), paid: `${authResult.payload?.settledAmount || 0} ${authResult.payload?.asset || 'UNKNOWN'}` };
-    const verifyToken = btoa(JSON.stringify(receiptData));
     const results = ["大吉。稲妻の如き速さでトランザクションが承認されるでしょう⚡", "中吉。ガス代が安定し、穏やかな巡礼の一日になります🕊️", "小吉。HODLあるのみ。徳を積むのに適した日です💎", "末吉。秘密鍵のバックアップを再確認せよ、という神仏の啓示です🔑"];
     const resultText = results[Math.floor(Math.random() * results.length)];
 
-    const matchedRequirement = OMIKUJI_REQUIREMENTS.find(req => req.asset === authResult.payload?.asset) || OMIKUJI_REQUIREMENTS[0];
+    const matchedRequirement = prepared.requirements.find(req => req.asset === authResult.payload?.asset) || prepared.requirements[0];
     const executionReceipt = payment402.buildExecutionReceipt({
         requirement: matchedRequirement,
         authResult,
+        execution_status: "completed",
+        receipt_state: { delivered: true },
         verification_method: "server_receipt_v1",
         recorded_hash: `skill:omikuji:v1:${Date.now()}`,
         result: {
@@ -85,7 +87,10 @@ omikujiApp.post('/', async (c) => {
         result: resultText,
         paid: `${authResult.payload?.settledAmount || 0} ${authResult.payload?.asset || 'UNKNOWN'}`,
         execution_receipt: executionReceipt
-    }, 200, payment402.buildSuccessReceiptHeaders(verifyToken));
+    }, 200, payment402.buildSuccessReceiptHeaders(
+        encodeUnsignedBase64Json(executionReceipt),
+        "unsigned_base64json"
+    ));
 });
 
 export default omikujiApp;

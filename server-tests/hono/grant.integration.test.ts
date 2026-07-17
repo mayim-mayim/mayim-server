@@ -5,6 +5,7 @@ import { describe, test, expect, vi } from 'vitest';
 import omikujiApp from '../../packages/hono/src/routes/skills/omikuji';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { getPayment402 } from '../../packages/hono/src/core/payment';
+import { InMemoryAtomicReplayStore, type AtomicReplayStore } from '@ln-church/server';
 
 // 補助1: HMAC JWS生成ヘルパー
 async function createMockGrant(claims: any, secret: string) {
@@ -44,11 +45,12 @@ async function createEd25519MockGrant(claims: any) {
 
 describe('Grant Verifier Integration (Omikuji)', () => {
     const mockEnv = {
-        FAUCET_SECRET: 'test-secret-key',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         TEST_GRANT_SECRET: 'test-secret-key',
         TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com',
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockResolvedValue(undefined) } as any,
+        get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
         MY_NODE_DOMAIN: 'mock-node.com'
     };
 
@@ -74,7 +76,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 2. valid grant -> 200 (agentId を追加)
     test('Valid grant in paymentOverride returns 200', async () => {
-        const proof = await createMockGrant(validClaims, mockEnv.FAUCET_SECRET);
+        const proof = await createMockGrant(validClaims, mockEnv.TEST_GRANT_SECRET);
         const req = new Request('https://mock-node.com/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -98,7 +100,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 4. expired grant -> 403 (agentId を追加)
     test('Expired grant returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, exp: Math.floor(Date.now() / 1000) - 100 }, mockEnv.FAUCET_SECRET);
+        const proof = await createMockGrant({ ...validClaims, exp: Math.floor(Date.now() / 1000) - 100 }, mockEnv.TEST_GRANT_SECRET);
         const req = new Request('https://mock-node.com/', {
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -110,7 +112,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 5. wrong audience -> 403 (agentId を追加)
     test('Wrong audience returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, aud: "https://wrong-audience.com" }, mockEnv.FAUCET_SECRET);
+        const proof = await createMockGrant({ ...validClaims, aud: "https://wrong-audience.com" }, mockEnv.TEST_GRANT_SECRET);
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -122,7 +124,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 6. wrong route scope -> 403 (agentId を追加)
     test('Wrong route scope returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, scope: { routes: ["/api/other"], methods: ["POST"] } }, mockEnv.FAUCET_SECRET);
+        const proof = await createMockGrant({ ...validClaims, scope: { routes: ["/api/other"], methods: ["POST"] } }, mockEnv.TEST_GRANT_SECRET);
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -134,8 +136,11 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 7. replayed jti -> 403 (agentId を追加)
     test('Replayed token returns 403', async () => {
-        const proof = await createMockGrant(validClaims, mockEnv.FAUCET_SECRET);
-        const replayEnv = { ...mockEnv, RECEIPT_KV: { get: vi.fn().mockResolvedValue("used"), put: vi.fn() } as any };
+        const proof = await createMockGrant(validClaims, mockEnv.TEST_GRANT_SECRET);
+        const replayStore: AtomicReplayStore = {
+            consume: vi.fn().mockResolvedValue({ consumed: false, reason: "proof_reused" })
+        };
+        const replayEnv = { ...mockEnv, ATOMIC_REPLAY_STORE: replayStore };
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -203,11 +208,21 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
         // 実際のPayment402エンジンを通して、payloadに期待するセマンティクスが含まれているか確認
         const p402 = getPayment402({ env: mockEnv } as any);
-        const result = await p402.verify(req, [{ amount: 1, asset: 'GRANT_CREDIT' }]);
+        const prepared = await p402.prepareRequirements(req, [{
+            amount: 1,
+            asset: 'GRANT_CREDIT',
+            surface: {
+                settlement_rail: 'none',
+                access_path: 'sponsored_grant',
+                payment_intent: 'sponsored_access'
+            }
+        }]);
+        const result = await p402.verify(req, prepared.requirements);
 
         expect(result.isValid).toBe(true);
         expect(result.payload?.accessPath).toBe('sponsored_grant');
         expect(result.payload?.authorizationArtifact).toBe('scoped_grant');
         expect(result.payload?.settlementRail).toBe('none');
+        expect(result.payload?.settlementVerified).toBe(false);
     });
 });

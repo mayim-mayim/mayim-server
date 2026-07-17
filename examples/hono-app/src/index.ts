@@ -4,8 +4,12 @@ import {
   systemApp, 
   omikujiApp, 
   jsonRepairApp, 
-  compressorApp 
+  compressorApp,
+  benchmarkApp
 } from '@ln-church/hono'; // 自作パッケージからインポート！
+
+// Cloudflare Durable Object binding `REPLAY_GUARD` points at this export.
+export { ReplayGuardDurableObject } from '@ln-church/hono';
 
 const app = new Hono();
 
@@ -17,5 +21,6 @@ app.route('/api/agent', systemApp);
 app.route('/api/agent/omikuji', omikujiApp);
 app.route('/api/agent/json-repair', jsonRepairApp);
 app.route('/api/agent/compressor', compressorApp);
+app.route('/api/agent/benchmark', benchmarkApp);
 
 export default app;

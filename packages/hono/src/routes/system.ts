@@ -17,6 +17,16 @@ const systemApp = new Hono<{ Bindings: Bindings }>();
 // 💧 Faucet API
 systemApp.all('/faucet', async (c) => {
     const faucetVerifier = new FaucetVerifier({ secret: c.env.FAUCET_SECRET });
+    if (!faucetVerifier.isConfigured()) {
+        return c.json({
+            status: "error",
+            error_code: "FAUCET_NOT_CONFIGURED",
+            message: "The test-token faucet is temporarily unavailable."
+        }, 503, {
+            "Cache-Control": "no-store",
+            "Retry-After": "60"
+        });
+    }
     let agentId = "Anonymous_Agent";
     
     if (c.req.method === 'POST') {
@@ -151,8 +161,8 @@ systemApp.get('/manifest', (c) => {
             },
             {
                 profile: "mpp",
-                status: "experimental",
-                description: "Experimental support for header parsing and basic hash shape check. Full amount/finality verification requires external node integration."
+                status: "planned",
+                description: "Metadata boundary only. No executable verifier is advertised until an external adapter binds amount, canonical requirement, and finality evidence."
             },
             {
                 profile: "ap2_observation",

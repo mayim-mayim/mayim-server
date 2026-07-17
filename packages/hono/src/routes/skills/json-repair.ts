@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import type { KVNamespace } from '@cloudflare/workers-types';
 import { ShrineClient } from '../../integration/ShrineClient';
-import { getPayment402 } from '../../core/payment';
-import type { PaidSurfaceRequirement } from '@ln-church/server';
+import { getPayment402, preparePaymentRequirements } from '../../core/payment';
+import { encodeUnsignedBase64Json, type PaidSurfaceRequirement } from '@ln-church/server';
 
 type Bindings = { FAUCET_SECRET: string; MACAROON_SECRET: string; RECEIPT_KV: KVNamespace; MAIN_SHRINE_URL: string; MY_NODE_DOMAIN: string; };
 
@@ -19,7 +19,7 @@ const JSON_REPAIR_REQUIREMENTS: PaidSurfaceRequirement[] = [
         }
     },
     {
-        amount: 2, asset: "FAUCET_CREDIT",
+        amount: 1, asset: "FAUCET_CREDIT",
         surface: {
             surface_id: "skill:json-repair:v1", resource: "/api/agent/json-repair", action_type: "json_repair", payment_intent: "charge", settlement_rail: "faucet", access_path: "faucet", deterministic: true,
             expected_client_behavior: { action: "pay_and_verify", reason: "Faucet credit accepted for skill validation." },
@@ -36,9 +36,47 @@ const JSON_REPAIR_REQUIREMENTS: PaidSurfaceRequirement[] = [
     }
 ];
 
+function repairJson(rawText: string): { repairedJson: unknown; isRepaired: boolean } | null {
+    try {
+        return { repairedJson: JSON.parse(rawText), isRepaired: false };
+    } catch {
+        let fixedText = rawText;
+        const codeBlockMatch = fixedText.match(new RegExp('`{3}(?:json)?\\s*([\\s\\S]*?)\\s*`{3}'));
+        if (codeBlockMatch) fixedText = codeBlockMatch[1];
+        fixedText = fixedText.replace(/,\s*([\]}])/g, '$1');
+
+        try {
+            return { repairedJson: JSON.parse(fixedText), isRepaired: true };
+        } catch {
+            return null;
+        }
+    }
+}
+
 jsonRepairApp.post('/', async (c) => {
+    const requestBody = await c.req.raw.clone().json().catch(() => null) as any;
+    if (!requestBody || typeof requestBody.raw_text !== "string" || requestBody.raw_text.length === 0) {
+        return c.json({ status: "error", message: "Provide non-empty string field 'raw_text' in JSON body." }, 400);
+    }
+    const rawText = requestBody.raw_text;
+    // Repairability is part of request validation. Resolve it before proof
+    // verification/atomic consumption so an expected 422 can never strand a
+    // consumed credential without an execution receipt.
+    const repairResult = repairJson(rawText);
+    if (!repairResult) {
+        return c.json({
+            status: "failed",
+            message: "JSON is too mangled to repair algorithmically.",
+            payment_status: "not_started",
+            execution_status: "validation_failed"
+        }, 422);
+    }
+    const { repairedJson, isRepaired } = repairResult;
+
     const payment402 = getPayment402(c);
-    const authResult = await payment402.verify(c.req.raw, JSON_REPAIR_REQUIREMENTS);
+    const prepared = await preparePaymentRequirements(c, payment402, JSON_REPAIR_REQUIREMENTS);
+    if (prepared instanceof Response) return prepared;
+    const authResult = await payment402.verify(c.req.raw, prepared.requirements);
 
     if (!authResult.isValid) {
         const agentId = c.req.header('x-agent-id') || 'unknown';
@@ -49,39 +87,15 @@ jsonRepairApp.post('/', async (c) => {
             const shrineClient = new ShrineClient(c.env.MAIN_SHRINE_URL, c.env.MY_NODE_DOMAIN);
             c.executionCtx.waitUntil(shrineClient.reportSinner(agentId, errorMsg, authResult.payload?.receiptId || "none"));
         }
-        return c.json(payment402.buildPaidSurfaceChallenge(JSON_REPAIR_REQUIREMENTS), 402, payment402.buildChallengeHeaders(JSON_REPAIR_REQUIREMENTS));
+        return c.json(payment402.buildPaidSurfaceChallenge(prepared.requirements), 402, payment402.buildChallengeHeaders(prepared.requirements));
     }
 
-    let rawText = "";
-    try {
-        const body = await c.req.json();
-        rawText = body.raw_text || "";
-    } catch (e) { return c.json({ status: "error", message: "Invalid request. Provide 'raw_text' in JSON body." }, 400); }
-    if (!rawText) return c.json({ status: "error", message: "Missing 'raw_text'" }, 400);
-
-    let repairedJson = null;
-    let isRepaired = false;
-
-    try {
-        repairedJson = JSON.parse(rawText);
-    } catch (initialError) {
-        isRepaired = true;
-        let fixedText = rawText;
-        const codeBlockMatch = fixedText.match(new RegExp('`{3}(?:json)?\\s*([\\s\\S]*?)\\s*`{3}'));
-        if (codeBlockMatch) fixedText = codeBlockMatch[1];
-        fixedText = fixedText.replace(/,\s*([\]}])/g, '$1');
-
-        try { repairedJson = JSON.parse(fixedText); } 
-        catch (secondError) { return c.json({ status: "failed", message: "JSON is too mangled to repair algorithmically.", paid: `${authResult.payload?.settledAmount || 0} ${authResult.payload?.asset || 'UNKNOWN'}` }, 422); }
-    }
-
-    const receiptData = { txHash: authResult.payload?.receiptId || "N/A", ritual: "JSON_REPAIR", timestamp: Date.now(), paid: `${authResult.payload?.settledAmount || 0} ${authResult.payload?.asset || 'UNKNOWN'}` };
-    const verifyToken = btoa(JSON.stringify(receiptData));
-
-    const matchedRequirement = JSON_REPAIR_REQUIREMENTS.find(req => req.asset === authResult.payload?.asset) || JSON_REPAIR_REQUIREMENTS[0];
+    const matchedRequirement = prepared.requirements.find(req => req.asset === authResult.payload?.asset) || prepared.requirements[0];
     const executionReceipt = payment402.buildExecutionReceipt({
         requirement: matchedRequirement,
         authResult,
+        execution_status: "completed",
+        receipt_state: { delivered: true },
         verification_method: "server_receipt_v1",
         recorded_hash: `skill:json-repair:v1:${rawText.length}`,
         result: { deterministic: true, output_hash: `skill:json-repair:v1:${JSON.stringify(repairedJson).length}`, output_schema: matchedRequirement.surface?.output_schema }
@@ -93,7 +107,10 @@ jsonRepairApp.post('/', async (c) => {
         result: repairedJson,
         paid: `${authResult.payload?.settledAmount || 0} ${authResult.payload?.asset || 'UNKNOWN'}`,
         execution_receipt: executionReceipt
-    }, 200, payment402.buildSuccessReceiptHeaders(verifyToken));
+    }, 200, payment402.buildSuccessReceiptHeaders(
+        encodeUnsignedBase64Json(executionReceipt),
+        "unsigned_base64json"
+    ));
 });
 
 export default jsonRepairApp;

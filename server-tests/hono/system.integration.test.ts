@@ -5,7 +5,7 @@ import app from '../../packages/hono/src/index';
 
 describe('System Routes Integration (Benchmark-First)', () => {
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: {
             get: async () => null,
@@ -28,6 +28,20 @@ describe('System Routes Integration (Benchmark-First)', () => {
         expect(json.next_action.capabilities[0].paid_surface_id).toBe("benchmark:ping:v1");
         expect(json.next_action.capabilities[0].agent_readable).toBe(true);
         expect(json.next_action.capabilities[0].expected_client_behavior).toBe("pay_and_verify");
+    });
+
+    test('Faucet issuance fails closed when its secret is not configured', async () => {
+        const res = await systemApp.request(
+            new Request('http://localhost/faucet', { method: 'POST' }),
+            undefined,
+            { ...mockEnv, FAUCET_SECRET: '' }
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(503);
+        expect(json.error_code).toBe('FAUCET_NOT_CONFIGURED');
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+        expect(JSON.stringify(json)).not.toContain('grant_token');
     });
 
     test('Manifest exposes benchmark_provider role and current version', async () => {
@@ -135,7 +149,8 @@ describe('System Routes Integration (Benchmark-First)', () => {
         expect(x402.status).toBe("planned");
 
         const mpp = json.paid_surface_profiles.find((p: any) => p.profile === "mpp");
-        expect(mpp.status).toBe("experimental");
+        expect(mpp.status).toBe("planned");
+        expect(mpp.description).toContain("No executable verifier");
 
         const ap2 = json.paid_surface_profiles.find((p: any) => p.profile === "ap2_observation");
         expect(ap2.status).toBe("planned");
@@ -145,7 +160,7 @@ describe('System Routes Integration (Benchmark-First)', () => {
 
 describe('Provider-Declared Manifest Emitter Integration', () => {
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: { get: async () => null, put: async () => undefined } as any,
         MAIN_SHRINE_URL: 'http://mock-shrine.com',

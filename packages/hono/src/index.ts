@@ -18,6 +18,7 @@ import benchmarkApp from './routes/benchmark';
 // すべての自信作を外部から使えるようにエクスポート
 export * from './core/config';
 export * from './core/receipt-store';
+export * from './core/challenge-issuer';
 export * from './core/security';
 export * from './integration/ShrineClient';
 
@@ -26,6 +27,7 @@ export { default as systemApp } from './routes/system';
 export { default as omikujiApp } from './routes/skills/omikuji';
 export { default as jsonRepairApp } from './routes/skills/json-repair';
 export { default as compressorApp } from './routes/skills/compressor';
+export { default as benchmarkApp } from './routes/benchmark';
 
 type Bindings = {
     RECEIPT_KV: KVNamespace; 
