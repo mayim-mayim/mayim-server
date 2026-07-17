@@ -31,6 +31,40 @@ describe('GrantVerifier Strict Validation', () => {
         scope: { routes: ['/api/agent/omikuji'], methods: ['POST'] }
     };
 
+    it('is configured only with canonical HTTPS trust boundaries and a resolver', () => {
+        expect(new GrantVerifier(mockOptions).isConfigured()).toBe(true);
+
+        for (const invalidAudience of [
+            'http://kari.mayim-mayim.com',
+            'https://kari.mayim-mayim.com/path',
+            'https://Your-domain-URL',
+            'https://localhost',
+            'https://127.0.0.1',
+            'https://127.1',
+            'https://[::1]',
+            'https://2130706433',
+            'https://host.123',
+            'https://singlelabel',
+            'https://bad_name.example',
+            'https://-bad.example',
+            'https://bad-.example',
+            'https://bad..example'
+        ]) {
+            expect(new GrantVerifier({ ...mockOptions, audience: invalidAudience }).isConfigured()).toBe(false);
+        }
+
+        for (const invalidOptions of [
+            { ...mockOptions, trustedIssuers: [] },
+            { ...mockOptions, trustedIssuers: ['http://kari.mayim-mayim.com'] },
+            { ...mockOptions, trustedIssuers: ['https://localhost'] },
+            { ...mockOptions, trustedIssuers: ['https://127.0.0.1'] },
+            { ...mockOptions, trustedIssuers: ['https://bad_issuer.example'] },
+            { ...mockOptions, issuerKeyResolver: undefined as any }
+        ]) {
+            expect(new GrantVerifier(invalidOptions).isConfigured()).toBe(false);
+        }
+    });
+
     it('JTI(トークン識別子)が欠損している場合はエラーになること', async () => {
         const verifier = new GrantVerifier(mockOptions);
         const claims = { ...baseClaims };

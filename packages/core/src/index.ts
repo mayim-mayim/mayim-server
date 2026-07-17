@@ -646,7 +646,7 @@ export class Payment402 {
             }
         }
         if (prepared.length === 0) {
-            throw new Error("No executable canonical payment options are configured.");
+            throw new PaymentConfigurationError("No executable canonical payment options are configured.");
         }
         return { requirements: prepared, idempotency_key: idempotencyKey };
     }
@@ -868,6 +868,26 @@ export class Payment402 {
             ]
         };
 
+        const authorizationExamples = accepted_payments.map(payment => {
+            switch (payment.canonical_requirement.authorization_scheme) {
+                case "L402": return "L402 {credential_challenge.macaroon}:{paid_invoice_preimage}";
+                case "Faucet": return "Faucet {token}";
+                case "Grant": return "Grant {jws}";
+                default: return payment.canonical_requirement.authorization_scheme;
+            }
+        });
+        const nextRequestSchema: Record<string, any> = {
+            Authorization: authorizationExamples.join(" | "),
+            "Idempotency-Key": accepted_payments[0].canonical_requirement.idempotency_key
+        };
+        if (accepted_payments.some(payment => payment.canonical_requirement.authorization_scheme === "Grant")) {
+            nextRequestSchema.paymentOverride = {
+                type: "grant",
+                proof: "{JWS_GRANT_TOKEN}",
+                asset: "GRANT_CREDIT"
+            };
+        }
+
         const challenge: PaidSurfaceChallenge = {
             schema_version: "ln_church.paid_surface_challenge.v1",
             error: "Payment Required",
@@ -880,15 +900,7 @@ export class Payment402 {
             },
             instruction_for_agents: {
                 guide: "Select one accepted payment option, submit a valid payment proof, execute once, then verify the execution receipt.",
-                next_request_schema: {
-                    Authorization: "L402 {credential_challenge.macaroon}:{paid_invoice_preimage} | Faucet {token} | Grant {jws}",
-                    "Idempotency-Key": accepted_payments[0].canonical_requirement.idempotency_key,
-                    paymentOverride: {
-                        type: "grant",
-                        proof: "{JWS_GRANT_TOKEN}",
-                        asset: "GRANT_CREDIT"
-                    }
-                }
+                next_request_schema: nextRequestSchema
             },
             legacy: {
                 compatible_challenge_headers: true,

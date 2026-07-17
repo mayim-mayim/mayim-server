@@ -24,12 +24,56 @@ export interface GrantVerifierOptions {
     now?: () => number;
 }
 
+const PLACEHOLDER_HOSTS = new Set([
+    'undefined',
+    'null',
+    'unknown',
+    'unknown-domain',
+    'your-domain-url'
+]);
+
+export function isWellFormedMultiLabelDnsHostname(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length > 253) return false;
+    const hostname = value.toLowerCase();
+    if (PLACEHOLDER_HOSTS.has(hostname)) return false;
+    const labels = hostname.split('.');
+    if (labels.length < 2 || labels.some(label => label.length === 0 || label.length > 63)) return false;
+    if (labels.every(label => /^[0-9]+$/.test(label))) return false;
+    if (!/[a-z]/.test(labels[labels.length - 1])) return false;
+    return labels.every(label => /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
+}
+
+export function isCanonicalHttpsOrigin(value: unknown): value is string {
+    if (typeof value !== 'string' || value === '' || value !== value.trim()) return false;
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'https:'
+            && parsed.origin === value
+            && parsed.username === ''
+            && parsed.password === ''
+            && parsed.pathname === '/'
+            && parsed.search === ''
+            && parsed.hash === ''
+            && isWellFormedMultiLabelDnsHostname(parsed.hostname);
+    } catch {
+        return false;
+    }
+}
+
 export class GrantVerifier implements PaymentVerifier {
     public readonly scheme = 'grant';
     private readonly now: () => number;
 
     constructor(private options: GrantVerifierOptions) {
         this.now = options.now || (() => Date.now());
+    }
+
+    public isConfigured(): boolean {
+        return isCanonicalHttpsOrigin(this.options.audience)
+            && Array.isArray(this.options.trustedIssuers)
+            && this.options.trustedIssuers.length > 0
+            && this.options.trustedIssuers.every(isCanonicalHttpsOrigin)
+            && typeof this.options.issuerKeyResolver === 'function';
     }
 
     private async extractProof(req: any): Promise<string | null> {
@@ -73,6 +117,9 @@ export class GrantVerifier implements PaymentVerifier {
     }
 
     public async verify(req: any): Promise<VerifyResult> {
+        if (!this.isConfigured()) {
+            return { isValid: false, error: "Grant verifier is not configured with valid HTTPS trust boundaries." };
+        }
         const token = await this.extractProof(req);
         if (!token) return { isValid: false, error: "Missing grant proof." };
 

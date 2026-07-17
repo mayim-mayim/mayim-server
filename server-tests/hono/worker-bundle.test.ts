@@ -34,6 +34,8 @@ describe("Cloudflare Worker production bundle", () => {
 
             const bundle = readFileSync(join(outputDirectory, "index.js"), "utf8");
             expect(bundle).toContain("Verification failed. Signature doesn't match");
+            expect(bundle).not.toContain("TEST_GRANT_SECRET");
+            expect(bundle).not.toContain("GRANT_VERIFIER");
             expect(bundle).not.toMatch(/createRequire\(import\.meta\.url\)/);
             expect(bundle).not.toMatch(/require\d*\(["']macaroons\.js["']\)/);
         } finally {

@@ -2,7 +2,7 @@
 import { Payment402, PaymentConfigurationError } from '@ln-church/server';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { L402Verifier } from '@ln-church/verifier-l402';
-import { GrantVerifier } from '@ln-church/verifier-grant';
+import { GrantVerifier, isWellFormedMultiLabelDnsHostname } from '@ln-church/verifier-grant';
 import type {
     AtomicReplayStore,
     L402ChallengeIssuer,
@@ -13,6 +13,25 @@ import { DurableObjectAtomicReplayStore } from './receipt-store';
 import { ServiceBindingL402ChallengeIssuer } from './challenge-issuer';
 
 const jwksCache = new Map<string, CryptoKey>();
+
+const grantAudienceForNodeDomain = (value: unknown): string => {
+    if (typeof value !== "string" || value === "" || value !== value.trim()) return "";
+    if (value.includes("://") || /[/?#@]/.test(value)) return "";
+    try {
+        const audience = new URL(`https://${value}`);
+        if (audience.protocol !== "https:"
+            || audience.pathname !== "/"
+            || audience.search !== ""
+            || audience.hash !== ""
+            || value.toLowerCase() !== audience.hostname
+            || !isWellFormedMultiLabelDnsHostname(audience.hostname)) {
+            return "";
+        }
+        return audience.origin;
+    } catch {
+        return "";
+    }
+};
 
 export const getPayment402 = (c: any) => {
     const now = typeof c.env.PAYMENT_NOW === "function" ? c.env.PAYMENT_NOW : undefined;
@@ -25,13 +44,9 @@ export const getPayment402 = (c: any) => {
         .split(',').map((i: string) => i.trim()).filter(Boolean);
 
     const grant = new GrantVerifier({
-        audience: `https://${c.env.MY_NODE_DOMAIN}`,
+        audience: grantAudienceForNodeDomain(c.env.MY_NODE_DOMAIN),
         trustedIssuers: trustedIssuers,
         issuerKeyResolver: async (iss: string, kid?: string) => {
-            if (c.env.TEST_GRANT_SECRET && iss === "https://trusted-issuer.example.com") {
-                return crypto.subtle.importKey('raw', new TextEncoder().encode(c.env.TEST_GRANT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
-            }
-
             const cacheKey = kid ? `${iss}#${kid}` : iss;
             if (jwksCache.has(cacheKey)) return jwksCache.get(cacheKey)!;
 
@@ -94,8 +109,8 @@ export const getPayment402 = (c: any) => {
 
 /**
  * Production route boundary for payment configuration failures. A server
- * without atomic replay coordination must never downgrade that condition into
- * an executable 402 challenge.
+ * without complete executable payment wiring must never downgrade that
+ * condition into a 402 challenge.
  */
 export const preparePaymentRequirements = async (
     c: any,
@@ -109,7 +124,7 @@ export const preparePaymentRequirements = async (
         return c.json({
             status: "error",
             error_code: error.code,
-            message: "Paid execution is temporarily unavailable because atomic replay protection is not configured."
+            message: "Paid execution is temporarily unavailable because payment verification is not fully configured."
         }, 503, {
             "Cache-Control": "no-store",
             "Retry-After": "60"

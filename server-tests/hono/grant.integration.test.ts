@@ -1,11 +1,16 @@
 /// <reference types="node" />
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
-import { describe, test, expect, vi } from 'vitest';
+import { afterAll, beforeAll, describe, test, expect, vi } from 'vitest';
 import omikujiApp from '../../packages/hono/src/routes/skills/omikuji';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
 import { getPayment402 } from '../../packages/hono/src/core/payment';
 import { InMemoryAtomicReplayStore, type AtomicReplayStore } from '@ln-church/server';
+
+const TEST_GRANT_SECRET = 'test-secret-key';
+const PRIMARY_ISSUER = 'https://grant-integration-issuer.example.com';
+const SECONDARY_ISSUER = 'https://grant-integration-secondary.example.com';
+const WEAK_HS256_ISSUER = 'https://grant-integration-weak-hs256.example.com';
 
 // 補助1: HMAC JWS生成ヘルパー
 async function createMockGrant(claims: any, secret: string) {
@@ -18,36 +23,61 @@ async function createMockGrant(claims: any, secret: string) {
     return `${headerB64}.${payloadB64}.${sigB64}`;
 }
 
-// 補助2: Ed25519 JWS生成ヘルパー (Node.js crypto を使用)
-async function createEd25519MockGrant(claims: any) {
+// 補助2: production JWKS pathで検証するEd25519 JWS signer
+function createEd25519Signer(kid: string) {
     const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-    
-    const header = { alg: "EdDSA", typ: "JWT", kid: "test-ed25519-key" };
-    const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
-    const payloadB64 = Buffer.from(JSON.stringify(claims)).toString('base64url');
-    
-    const signature = crypto.sign(null, Buffer.from(`${headerB64}.${payloadB64}`), privateKey);
-    const sigB64 = signature.toString('base64url');
-    
     const rawPubKey = publicKey.export({ format: 'der', type: 'spki' }).slice(12);
-    
-    return { 
-        token: `${headerB64}.${payloadB64}.${sigB64}`,
+    return {
         jwk: {
             kty: "OKP",
             crv: "Ed25519",
             use: "sig",
-            kid: "test-ed25519-key",
+            alg: "EdDSA",
+            kid,
             x: rawPubKey.toString('base64url')
+        },
+        sign: (claims: any) => {
+            const headerB64 = Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid })).toString('base64url');
+            const payloadB64 = Buffer.from(JSON.stringify(claims)).toString('base64url');
+            const signature = crypto.sign(null, Buffer.from(`${headerB64}.${payloadB64}`), privateKey);
+            return `${headerB64}.${payloadB64}.${signature.toString('base64url')}`;
         }
     };
 }
 
+const primarySigner = createEd25519Signer('grant-integration-primary-key');
+const attackerSigner = createEd25519Signer('grant-integration-primary-key');
+const secondarySigner = createEd25519Signer('grant-integration-secondary-key');
+const jwksByIssuer = new Map<string, any>([
+    [PRIMARY_ISSUER, primarySigner.jwk],
+    [SECONDARY_ISSUER, secondarySigner.jwk]
+]);
+
 describe('Grant Verifier Integration (Omikuji)', () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeAll(() => {
+        originalFetch = globalThis.fetch;
+        globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
+            const url = typeof input === 'string'
+                ? input
+                : input instanceof URL
+                    ? input.href
+                    : input.url;
+            const issuer = [...jwksByIssuer.keys()].find(
+                candidate => url === `${candidate}/.well-known/jwks.json`
+            );
+            return Response.json({ keys: issuer ? [jwksByIssuer.get(issuer)] : [] });
+        }) as typeof globalThis.fetch;
+    });
+
+    afterAll(() => {
+        globalThis.fetch = originalFetch;
+    });
+
     const mockEnv = {
         FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-        TEST_GRANT_SECRET: 'test-secret-key',
-        TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com',
+        TRUSTED_GRANT_ISSUERS: PRIMARY_ISSUER,
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockResolvedValue(undefined) } as any,
         get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
@@ -55,7 +85,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
     };
 
     const validClaims = {
-        iss: "https://trusted-issuer.example.com",
+        iss: PRIMARY_ISSUER,
         sub: "agent-007",
         aud: "https://mock-node.com",
         jti: "unique-grant-123",
@@ -76,7 +106,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 2. valid grant -> 200 (agentId を追加)
     test('Valid grant in paymentOverride returns 200', async () => {
-        const proof = await createMockGrant(validClaims, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign(validClaims);
         const req = new Request('https://mock-node.com/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -88,7 +118,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 3. invalid signature -> 403 (agentId を追加)
     test('Invalid signature returns 403', async () => {
-        const proof = await createMockGrant(validClaims, "wrong-secret-key");
+        const proof = attackerSigner.sign(validClaims);
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -100,7 +130,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 4. expired grant -> 403 (agentId を追加)
     test('Expired grant returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, exp: Math.floor(Date.now() / 1000) - 100 }, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign({ ...validClaims, exp: Math.floor(Date.now() / 1000) - 100 });
         const req = new Request('https://mock-node.com/', {
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -112,7 +142,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 5. wrong audience -> 403 (agentId を追加)
     test('Wrong audience returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, aud: "https://wrong-audience.com" }, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign({ ...validClaims, aud: "https://wrong-audience.com" });
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -124,7 +154,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 6. wrong route scope -> 403 (agentId を追加)
     test('Wrong route scope returns 403', async () => {
-        const proof = await createMockGrant({ ...validClaims, scope: { routes: ["/api/other"], methods: ["POST"] } }, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign({ ...validClaims, scope: { routes: ["/api/other"], methods: ["POST"] } });
         const req = new Request('https://mock-node.com/', { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' },
@@ -136,7 +166,7 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 7. replayed jti -> 403 (agentId を追加)
     test('Replayed token returns 403', async () => {
-        const proof = await createMockGrant(validClaims, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign(validClaims);
         const replayStore: AtomicReplayStore = {
             consume: vi.fn().mockResolvedValue({ consumed: false, reason: "proof_reused" })
         };
@@ -164,22 +194,14 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
     // 9. Ed25519 real e2e flow (JWKS + kid resolution)
     test('Ed25519 real e2e flow (JWKS + kid resolution)', async () => {
-        const { token, jwk } = await createEd25519MockGrant({
+        const token = secondarySigner.sign({
             ...validClaims,
-            iss: "https://ed25519-issuer.example.com"
-        });
-
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = vi.fn(async (url) => {
-            if (url === "https://ed25519-issuer.example.com/.well-known/jwks.json") {
-                return { ok: true, json: async () => ({ keys: [jwk] }) } as any;
-            }
-            return originalFetch(url);
+            iss: SECONDARY_ISSUER
         });
 
         const testEnv = {
             ...mockEnv,
-            TRUSTED_GRANT_ISSUERS: "https://trusted-issuer.example.com,https://ed25519-issuer.example.com"
+            TRUSTED_GRANT_ISSUERS: `${PRIMARY_ISSUER},${SECONDARY_ISSUER}`
         };
 
         const req = new Request('https://mock-node.com/', {
@@ -190,13 +212,11 @@ describe('Grant Verifier Integration (Omikuji)', () => {
 
         const res = await omikujiApp.request(req, undefined, testEnv);
         expect(res.status).toBe(200);
-
-        globalThis.fetch = originalFetch; 
     });
 
     // 10. ★ 新規追加: セマンティクス（思想）の出力検証
     test('Valid grant exposes sponsored access semantics', async () => {
-        const proof = await createMockGrant(validClaims, mockEnv.TEST_GRANT_SECRET);
+        const proof = primarySigner.sign(validClaims);
 
         const req = new Request('https://mock-node.com/', {
             method: 'POST',
@@ -224,5 +244,34 @@ describe('Grant Verifier Integration (Omikuji)', () => {
         expect(result.payload?.authorizationArtifact).toBe('scoped_grant');
         expect(result.payload?.settlementRail).toBe('none');
         expect(result.payload?.settlementVerified).toBe(false);
+    });
+
+    test('production wiring ignores TEST_GRANT_SECRET and rejects a weak HS256 token', async () => {
+        const weakClaims = { ...validClaims, iss: WEAK_HS256_ISSUER };
+        const proof = await createMockGrant(weakClaims, TEST_GRANT_SECRET);
+        const productionEnv = {
+            ...mockEnv,
+            TRUSTED_GRANT_ISSUERS: WEAK_HS256_ISSUER,
+            TEST_GRANT_SECRET
+        };
+        const req = new Request('https://mock-node.com/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-agent-id': 'agent-007' },
+            body: JSON.stringify({ paymentOverride: { type: 'grant', proof, asset: 'GRANT_CREDIT' } })
+        });
+        const payment402 = getPayment402({ env: productionEnv } as any);
+        const prepared = await payment402.prepareRequirements(req, [{
+            amount: 1,
+            asset: 'GRANT_CREDIT',
+            surface: { settlement_rail: 'none', access_path: 'sponsored_grant' }
+        }]);
+
+        const result = await payment402.verify(req, prepared.requirements);
+
+        expect(result.isValid).toBe(false);
+        expect(result.error).toContain('Issuer key not found');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+            `${WEAK_HS256_ISSUER}/.well-known/jwks.json`
+        );
     });
 });
