@@ -6,7 +6,7 @@ describe('Seller-Side Observation Lookup (Paid Surface Diagnostics)', () => {
     let originalFetch: typeof globalThis.fetch;
 
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: { get: async () => null, put: async () => undefined } as any,
         MAIN_SHRINE_URL: 'http://mock-shrine.com',

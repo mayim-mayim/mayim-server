@@ -19,12 +19,13 @@ describe('Server Support Matrix Boundaries', () => {
         expect(x402?.notes).toContain("cannot emit a provider-verified x402 settlement receipt");
     });
 
-    test('MPP is basic/experimental and requires external node integration', () => {
+    test('MPP is metadata-only until a canonical finality verifier is integrated', () => {
         const matrix = getServerSupportMatrix();
         const mpp = matrix.capabilities.find(c => c.name === 'MPP');
         expect(mpp).toBeDefined();
-        expect(mpp?.provider_side_verifier).toBe('experimental');
-        expect(mpp?.notes).toContain("Full amount/finality verification requires external Lightning node");
+        expect(mpp?.provider_side_verifier).toBe('planned');
+        expect(mpp?.execution_receipt).toBe('schema_only');
+        expect(mpp?.notes).toContain("No executable MPP verifier");
     });
 
     test('Grant and Faucet are explicitly access paths, NOT settlement rails', () => {

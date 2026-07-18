@@ -1,0 +1,22 @@
+name = "ln-church-hono-provider"
+main = "src/index.ts"
+compatibility_date = "2026-07-17"
+# macaroons.js uses the Node crypto/Buffer compatibility layer for HMAC
+# verification. Keep this flag on deployments that enable L402.
+compatibility_flags = ["nodejs_compat"]
+
+# Required atomic replay boundary. The class is re-exported by src/index.ts.
+[[durable_objects.bindings]]
+name = "REPLAY_GUARD"
+class_name = "ReplayGuardDurableObject"
+
+# Add this migration before the first deployment that creates REPLAY_GUARD.
+[[migrations]]
+tag = "v1-replay-guard"
+new_sqlite_classes = ["ReplayGuardDurableObject"]
+
+# Optional. Without this binding, L402 is omitted while Faucet/Grant remain
+# available. The target Worker must expose POST /issue on its service binding.
+[[services]]
+binding = "L402_CHALLENGE_SERVICE"
+service = "your-private-l402-issuer-worker"

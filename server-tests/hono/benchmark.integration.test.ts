@@ -1,46 +1,71 @@
+import { Buffer } from 'node:buffer';
+import crypto from 'node:crypto';
 import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
 import benchmarkApp from '../../packages/hono/src/routes/benchmark';
 import { FaucetVerifier } from '@ln-church/verifier-faucet';
+import { InMemoryAtomicReplayStore } from '@ln-church/server';
+
+const BENCHMARK_GRANT_ISSUER = 'https://benchmark-grant-issuer.example.com';
+
+function createEd25519Signer(kid: string) {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const rawPubKey = publicKey.export({ format: 'der', type: 'spki' }).slice(12);
+    return {
+        jwk: {
+            kty: 'OKP', crv: 'Ed25519', use: 'sig', alg: 'EdDSA', kid,
+            x: rawPubKey.toString('base64url')
+        },
+        sign: (claims: any) => {
+            const headerB64 = Buffer.from(JSON.stringify({ alg: 'EdDSA', typ: 'JWT', kid })).toString('base64url');
+            const payloadB64 = Buffer.from(JSON.stringify(claims)).toString('base64url');
+            const signature = crypto.sign(null, Buffer.from(`${headerB64}.${payloadB64}`), privateKey);
+            return `${headerB64}.${payloadB64}.${signature.toString('base64url')}`;
+        }
+    };
+}
+
+const benchmarkGrantSigner = createEd25519Signer('benchmark-grant-integration-key');
 
 const mockEnv = {
-    FAUCET_SECRET: 'test-faucet-secret',
-    TEST_GRANT_SECRET: 'test-secret-key',
+    FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com', 
     MACAROON_SECRET: 'test-macaroon-secret',
     RECEIPT_KV: {
         get: async () => null,
         put: async () => undefined
     } as any,
+    get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
     MAIN_SHRINE_URL: 'http://mock-shrine.com',
     MY_NODE_DOMAIN: 'mock-node.com'
 };
 
-// JWS生成ヘルパー
-async function createMockGrant(claims: any, secret: string) {
-    const headerB64 = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=/g, '');
-    const payloadB64 = btoa(JSON.stringify(claims)).replace(/=/g, '');
-    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${headerB64}.${payloadB64}`));
-    const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-    return `${headerB64}.${payloadB64}.${sigB64}`;
-}
-
 describe('Benchmark Suite Integration', () => {
+    let originalFetch: typeof globalThis.fetch;
+
+    beforeAll(() => {
+        originalFetch = globalThis.fetch;
+        globalThis.fetch = vi.fn(async () => Response.json({ keys: [benchmarkGrantSigner.jwk] })) as typeof globalThis.fetch;
+    });
+
+    afterAll(() => {
+        globalThis.fetch = originalFetch;
+    });
+
     const mockEnv = {
-        FAUCET_SECRET: 'test-faucet-secret',
-        TEST_GRANT_SECRET: 'test-secret-key',
-        TRUSTED_GRANT_ISSUERS: 'https://trusted-issuer.example.com', 
+        FAUCET_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        TRUSTED_GRANT_ISSUERS: BENCHMARK_GRANT_ISSUER,
         MACAROON_SECRET: 'test-macaroon-secret',
         RECEIPT_KV: {
             get: async () => null,
             put: async () => undefined
         } as any,
+        get ATOMIC_REPLAY_STORE() { return new InMemoryAtomicReplayStore(); },
         MY_NODE_DOMAIN: 'mock-node.com'
     };
 
     // Grant用の共通クレーム定義
     const validGrantClaims = {
-        iss: "https://trusted-issuer.example.com",
+        iss: BENCHMARK_GRANT_ISSUER,
         sub: "benchmark-grant-agent",
         aud: "https://mock-node.com",
         jti: "unique-bench-grant-123",
@@ -67,14 +92,109 @@ describe('Benchmark Suite Integration', () => {
         expect(json.surface.surface_id).toBe("benchmark:ping:v1");
         expect(json.surface.action_type).toBe("benchmark_ping");
         
-        expect(json.accepted_payments.length).toBeGreaterThanOrEqual(3);
-        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(true);
+        // An unavailable L402 issuer must be omitted instead of advertising an
+        // unexecutable placeholder challenge.
+        expect(json.accepted_payments).toHaveLength(2);
+        expect(json.accepted_payments.some((p: any) => p.asset === "SATS")).toBe(false);
         expect(json.accepted_payments.some((p: any) => p.asset === "FAUCET_CREDIT")).toBe(true);
         expect(json.accepted_payments.some((p: any) => p.asset === "GRANT_CREDIT")).toBe(true);
+        expect(json.accepted_payments.every((p: any) => p.canonical_requirement)).toBe(true);
         
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
         expect(json.evidence.required).toContain("trace_id");
         expect(json.instruction_for_agents.next_request_schema).toBeDefined();
+    });
+
+    test('GET /ping without atomic replay wiring -> 503 and no payment challenge', async () => {
+        const envWithoutReplay = {
+            FAUCET_SECRET: mockEnv.FAUCET_SECRET,
+            TRUSTED_GRANT_ISSUERS: mockEnv.TRUSTED_GRANT_ISSUERS,
+            MACAROON_SECRET: mockEnv.MACAROON_SECRET,
+            RECEIPT_KV: mockEnv.RECEIPT_KV,
+            MY_NODE_DOMAIN: mockEnv.MY_NODE_DOMAIN
+        };
+
+        const res = await benchmarkApp.request(
+            new Request('http://localhost/ping'),
+            undefined,
+            envWithoutReplay
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(503);
+        expect(json.error_code).toBe('PAYMENT_CONFIGURATION_ERROR');
+        expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+        expect(res.headers.get('WWW-Authenticate')).toBeNull();
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+    });
+
+    test('GET /ping omits Faucet when its verifier secret is not configured', async () => {
+        const res = await benchmarkApp.request(
+            new Request('http://localhost/ping'),
+            undefined,
+            { ...mockEnv, FAUCET_SECRET: '' }
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(402);
+        expect(json.accepted_payments).toHaveLength(1);
+        expect(json.accepted_payments[0].asset).toBe('GRANT_CREDIT');
+        expect(JSON.stringify(json)).not.toContain('FAUCET_CREDIT');
+    });
+
+    test.each([
+        undefined,
+        'Your-domain-URL',
+        'https://invalid.example/path',
+        'localhost',
+        '127.0.0.1',
+        '127.1',
+        '[::1]',
+        '2130706433',
+        'host.123',
+        'singlelabel',
+        'bad_name.example',
+        '-bad.example',
+        'bad-.example',
+        'bad..example',
+        'ex%61mple.com'
+    ])(
+        'GET /ping omits Grant when MY_NODE_DOMAIN is %s',
+        async (nodeDomain) => {
+            const res = await benchmarkApp.request(
+                new Request('http://localhost/ping'),
+                undefined,
+                { ...mockEnv, MY_NODE_DOMAIN: nodeDomain }
+            );
+            const json = await res.json();
+
+            expect(res.status).toBe(402);
+            expect(json.accepted_payments).toHaveLength(1);
+            expect(json.accepted_payments[0].asset).toBe('FAUCET_CREDIT');
+            expect(JSON.stringify(json)).not.toContain('GRANT_CREDIT');
+            expect(json.instruction_for_agents.next_request_schema.Authorization).not.toContain('Grant');
+            expect(json.instruction_for_agents.next_request_schema.paymentOverride).toBeUndefined();
+        }
+    );
+
+    test('GET /ping returns 503 without challenge headers when no option is executable', async () => {
+        const res = await benchmarkApp.request(
+            new Request('http://localhost/ping'),
+            undefined,
+            {
+                ...mockEnv,
+                FAUCET_SECRET: '',
+                MY_NODE_DOMAIN: undefined
+            }
+        );
+        const json = await res.json();
+
+        expect(res.status).toBe(503);
+        expect(json.error_code).toBe('PAYMENT_CONFIGURATION_ERROR');
+        expect(res.headers.get('PAYMENT-REQUIRED')).toBeNull();
+        expect(res.headers.get('x-402-payment-required')).toBeNull();
+        expect(res.headers.get('WWW-Authenticate')).toBeNull();
+        expect(res.headers.get('Idempotency-Key')).toBeNull();
     });
 
     // 象限2: Paid Ping (強化版)
@@ -103,9 +223,17 @@ describe('Benchmark Suite Integration', () => {
         expect(json.execution_receipt.schema_version).toBe("ln_church.execution_receipt.v1");
         expect(json.execution_receipt.surface_id).toBe("benchmark:ping:v1");
         expect(json.execution_receipt.action_type).toBe("benchmark_ping");
-        expect(json.execution_receipt.payment_status).toBe("succeeded");
+        expect(json.execution_receipt.payment_status).toBe("sponsored");
         expect(json.execution_receipt.execution_status).toBe("completed");
         expect(json.execution_receipt.verification_status).toBe("verified");
+        expect(json.execution_receipt.receipt_format).toBe("unsigned_base64json");
+        expect(json.execution_receipt.receipt_state).toEqual({
+            present: true,
+            server_asserted: true,
+            signature_verified: false,
+            settlement_verified: false,
+            delivered: true
+        });
         expect(json.execution_receipt.result.deterministic).toBe(true);
         expect(json.execution_receipt.timestamp).toBeDefined();
     });
@@ -144,8 +272,8 @@ describe('Benchmark Suite Integration', () => {
 
     // 象限5: Paid Ping (Grant) (強化版)
     test('GET /ping paid via Grant -> returns deterministic response with accurate settlement rail metadata', async () => {
-        const proof = await createMockGrant(validGrantClaims, mockEnv.TEST_GRANT_SECRET);
-        const req = new Request('http://localhost/ping', {
+        const proof = benchmarkGrantSigner.sign(validGrantClaims);
+        const req = new Request('https://mock-node.com/ping', {
             headers: { 
                 'Authorization': `Grant ${proof}`,
                 'x-agent-id': 'benchmark-grant-agent'
@@ -167,8 +295,8 @@ describe('Benchmark Suite Integration', () => {
 
     // 象限6: Paid Echo (Grant / paymentOverride)
     test('POST /echo paid via Grant override -> returns deterministic body', async () => {
-        const proof = await createMockGrant(validGrantClaims, mockEnv.TEST_GRANT_SECRET);
-        const req = new Request('http://localhost/echo', {
+        const proof = benchmarkGrantSigner.sign(validGrantClaims);
+        const req = new Request('https://mock-node.com/echo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -221,7 +349,7 @@ describe('Corpus Replay Endpoints (Synthetic)', () => {
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
     });
 
-    test('GET /replay/:corpus_id/challenge returns strong pay_and_verify (402 challenge)', async () => {
+    test('GET /replay/:corpus_id/challenge marks strong corpus replay as non-executable', async () => {
         const mockCorpus = {
             corpus_id: "corp_strong",
             quality: "strong",
@@ -236,7 +364,10 @@ describe('Corpus Replay Endpoints (Synthetic)', () => {
         const json = await res.json();
 
         expect(res.status).toBe(402);
-        expect(res.headers.get('WWW-Authenticate')).toContain('L402 macaroon');
+        expect(res.headers.get('WWW-Authenticate')).toBe('SyntheticReplay executable="false"');
+        expect(res.headers.get('WWW-Authenticate')).not.toContain('L402');
+        expect(JSON.stringify(json)).not.toContain('placeholder');
+        expect(json.executable).toBe(false);
         expect(json.expected_client_behavior.action).toBe("pay_and_verify");
     });
 

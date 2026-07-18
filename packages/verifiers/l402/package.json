@@ -1,10 +1,11 @@
 {
   "name": "@ln-church/verifier-l402",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": ["dist", "README.md", "LICENSE"],
   "publishConfig": { "access": "public" },
   "dependencies": {
     "@ln-church/server": "*",

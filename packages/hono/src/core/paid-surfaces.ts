@@ -62,7 +62,7 @@ export const JSON_REPAIR_PAID_SURFACE = {
     surface_id: "skill:json-repair:v1", path: "/api/agent/json-repair", method: "POST", kind: "skill", action_type: "json_repair", payment_intent: "charge", deterministic: true, agent_readable: true,
     accepted_payments: [
         { asset: "SATS", amount: 50, settlement_rail: "l402", access_path: "direct_settlement" },
-        { asset: "FAUCET_CREDIT", amount: 2, settlement_rail: "faucet", access_path: "faucet" },
+        { asset: "FAUCET_CREDIT", amount: 1, settlement_rail: "faucet", access_path: "faucet" },
         { asset: "GRANT_CREDIT", amount: 2, settlement_rail: "none", access_path: "sponsored_grant" }
     ],
     expected_client_behavior: { action: "pay_and_verify", reason: "Pay to repair JSON." },

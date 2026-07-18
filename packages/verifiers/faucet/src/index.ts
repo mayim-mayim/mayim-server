@@ -1,15 +1,26 @@
 // packages/verifiers/faucet/src/index.ts
 
-import type { PaymentVerifier, VerifyResult } from '@ln-church/server';
+import { isStrongHmacSecret, sha256Prefixed, type PaymentVerifier, type VerifyResult } from '@ln-church/server';
 
 export class FaucetVerifier implements PaymentVerifier {
     // ★ 修正1: scheme プロパティを明示的に定義！
     public readonly scheme = 'faucet';
     
-    private secretKey: string;
+    private readonly secretKey?: string;
+    private readonly allowInsecureTestSecret: boolean;
+    private readonly now: () => number;
 
-    constructor(config: { secret: string }) {
+    constructor(config: { secret?: string; now?: () => number; allowInsecureTestSecret?: boolean }) {
         this.secretKey = config.secret;
+        this.allowInsecureTestSecret = config.allowInsecureTestSecret === true;
+        this.now = config.now || (() => Date.now());
+    }
+
+    public isConfigured(): boolean {
+        return isStrongHmacSecret(this.secretKey)
+            || (this.allowInsecureTestSecret
+                && typeof this.secretKey === "string"
+                && this.secretKey.trim() !== "");
     }
 
     // ==========================================
@@ -31,19 +42,27 @@ export class FaucetVerifier implements PaymentVerifier {
                 const cloned = req.clone();
                 const body = await cloned.json();
                 if (body?.paymentOverride?.type === 'faucet') return body.paymentOverride.proof;
-            } catch (e) {}
+            } catch {
+                return null;
+            }
         }
         return null;
     }
 
     // JWS（トークン）の生成ヘルパー（Faucetエンドポイントで使う用）
     async generateGrantToken(agentId: string): Promise<string> {
+        if (!this.isConfigured()) {
+            throw new Error("Faucet token issuer is not configured with a secret.");
+        }
+        if (typeof agentId !== "string" || agentId.trim() === "") {
+            throw new Error("Faucet token agentId must be a non-empty string.");
+        }
         const payload = {
             agentId,
             type: "faucet_grant",
             asset: "FAUCET_CREDIT",
             amount: 1,
-            exp: Math.floor(Date.now() / 1000) + 3600 // 1時間有効
+            exp: Math.floor(this.now() / 1000) + 3600 // 1時間有効
         };
         const payloadB64 = btoa(JSON.stringify(payload)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
         
@@ -75,6 +94,9 @@ export class FaucetVerifier implements PaymentVerifier {
 
     // 3. 引数を req: any だけに修正し、決済成功時の金額をセット！
     public async verify(req: any): Promise<VerifyResult> {
+        if (!this.isConfigured()) {
+            return { isValid: false, error: "Faucet verifier is not configured with a secret." };
+        }
         const token = await this.extractToken(req);
 
         if (!token) {
@@ -83,8 +105,11 @@ export class FaucetVerifier implements PaymentVerifier {
 
         try {
             // 🌟 封印されしHMAC検証ロジックを完全復活！
-            const [payloadB64, signatureB64] = token.split('.');
-            if (!payloadB64 || !signatureB64) throw new Error("Invalid token format.");
+            const tokenParts = token.split('.');
+            if (tokenParts.length !== 2 || !tokenParts[0] || !tokenParts[1]) {
+                throw new Error("Invalid token format.");
+            }
+            const [payloadB64, signatureB64] = tokenParts;
 
             const key = await this.getWebCryptoKey();
 
@@ -100,7 +125,16 @@ export class FaucetVerifier implements PaymentVerifier {
             if (!isValid) throw new Error("Invalid Faucet Signature.");
 
             const payload = JSON.parse(new TextDecoder().decode(this.base64UrlToUint8Array(payloadB64)));
-            if (payload.exp < Math.floor(Date.now() / 1000)) throw new Error("Faucet token has expired.");
+            if (!payload || typeof payload !== "object") throw new Error("Faucet token payload must be an object.");
+            if (typeof payload.agentId !== "string" || payload.agentId.trim() === "") throw new Error("Faucet token agentId is invalid.");
+            if (payload.type !== "faucet_grant") throw new Error("Faucet token type is invalid.");
+            if (payload.asset !== "FAUCET_CREDIT") throw new Error("Faucet token asset is invalid.");
+            if (!Number.isSafeInteger(payload.amount) || payload.amount <= 0) throw new Error("Faucet token amount must be a positive safe integer.");
+            if (!Number.isSafeInteger(payload.exp)) throw new Error("Faucet token exp must be a safe integer.");
+            if (payload.exp <= Math.floor(this.now() / 1000)) throw new Error("Faucet token has expired.");
+
+            const tokenHash = await sha256Prefixed(token);
+            const proofId = await sha256Prefixed(`faucet-proof:${token}`);
 
             return { 
                 isValid: true, 
@@ -109,7 +143,13 @@ export class FaucetVerifier implements PaymentVerifier {
                     agentId: payload.agentId, 
                     settledAmount: payload.amount, // 1
                     asset: payload.asset,          // FAUCET_CREDIT
-                    receiptId: `faucet-${signatureB64}`
+                    receiptId: `faucet:${tokenHash}`,
+                    paymentId: `faucet-payment:${tokenHash}`,
+                    proofId,
+                    accessPath: "faucet",
+                    authorizationArtifact: "faucet_token",
+                    settlementRail: "none",
+                    settlementVerified: false
                 }
             };
 
@@ -122,7 +162,7 @@ export class FaucetVerifier implements PaymentVerifier {
     private async getWebCryptoKey() {
         return await crypto.subtle.importKey(
             'raw',
-            new TextEncoder().encode(this.secretKey),
+            new TextEncoder().encode(this.secretKey!),
             { name: 'HMAC', hash: 'SHA-256' },
             false,
             ['sign', 'verify']

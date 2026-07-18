@@ -1,134 +1,162 @@
 import { describe, test, expect } from 'vitest';
-import { 
-    Payment402, 
-    PaymentRequirement, 
-    PaidSurfaceRequirement, 
-    lnChurchV1Mapper, 
-    UnsupportedStandardProfileError,
-    PaidSurfaceChallenge 
+import {
+    Payment402,
+    type PaymentRequirement,
+    type PaidSurfaceRequirement,
+    lnChurchV1Mapper,
+    UnsupportedStandardProfileError
 } from '../../packages/core/src/index';
 import { buildPaidSurfaceManifest } from '../../packages/core/src/index';
+import {
+    CONTRACT_L402_CANONICAL_REQUIREMENT,
+    CONTRACT_L402_INVOICE,
+    buildContractL402Macaroon
+} from '../fixtures/canonical-l402-contract';
+
+const contractCredentialChallenge = {
+    type: "l402" as const,
+    authorization_scheme: "L402" as const,
+    invoice: CONTRACT_L402_INVOICE,
+    macaroon: buildContractL402Macaroon()
+};
+
+function contractRequirement(
+    surface: PaidSurfaceRequirement["surface"] = {}
+): PaidSurfaceRequirement {
+    return {
+        amount: 10,
+        asset: "SATS",
+        surface: {
+            settlement_rail: "l402",
+            ...surface
+        },
+        canonical_requirement: CONTRACT_L402_CANONICAL_REQUIREMENT,
+        credential_challenge: contractCredentialChallenge
+    };
+}
 
 describe('Payment402 Canonical Provider Contract', () => {
-    // モック用のVerifier（今回はヘッダーテストなので空でOK）
     const payment402 = new Payment402([]);
-    const mockReq: PaymentRequirement = { amount: 50, asset: "SATS" };
-
-    test('buildChallengeHeaders generates strict standard headers', () => {
-        const headers = payment402.buildChallengeHeaders(mockReq);
-        
-        expect(headers['WWW-Authenticate']).toBe('Payment invoice="<fetch-via-hateoas>", charge="<fetch-via-hateoas>"');
-        expect(headers['x-402-payment-required']).toBe('price=50; asset=SATS; network=lightning');
-        expect(headers['PAYMENT-REQUIRED']).toBe('network="lightning", amount="50", asset="SATS"');
+    const paidSurfaceReq = contractRequirement({
+        surface_id: "benchmark:ping:v1",
+        resource: "/api/agent/benchmark/ping",
+        action_type: "benchmark_ping",
+        payment_intent: "benchmark",
+        deterministic: true,
+        expected_client_behavior: {
+            action: "pay_and_verify",
+            reason: "Deterministic paid benchmark endpoint."
+        },
+        evidence_schema: {
+            schema_version: "ln_church.execution_receipt.v1",
+            required: [
+                "trace_id",
+                "payment_status",
+                "execution_status",
+                "verification_status",
+                "timestamp"
+            ]
+        }
     });
 
-    test('buildSuccessReceiptHeaders generates standard receipt headers', () => {
+    test('buildChallengeHeaders emits the real canonical L402 challenge without placeholders', () => {
+        const headers = payment402.buildChallengeHeaders(paidSurfaceReq);
+
+        expect(headers['WWW-Authenticate']).toContain(`macaroon="${contractCredentialChallenge.macaroon}"`);
+        expect(headers['WWW-Authenticate']).toContain(`invoice="${CONTRACT_L402_INVOICE}"`);
+        expect(headers['WWW-Authenticate']).toContain(`id="${CONTRACT_L402_CANONICAL_REQUIREMENT.challenge_id}"`);
+        expect(headers['WWW-Authenticate']).toContain(`requirement_hash="${CONTRACT_L402_CANONICAL_REQUIREMENT.requirement_hash}"`);
+        expect(headers['WWW-Authenticate']).not.toMatch(/<[^>]+>/);
+        expect(headers['x-402-payment-required']).toBe(
+            `amount_atomic=10000; asset=lightning:sats; network=bitcoin-mainnet; requirement_hash=${CONTRACT_L402_CANONICAL_REQUIREMENT.requirement_hash}`
+        );
+        expect(headers['PAYMENT-REQUIRED']).toBe(
+            `network="bitcoin-mainnet", amount_atomic="10000", decimals="3", asset="lightning:sats", id="ch_contract_l402_001", requirement_hash="${CONTRACT_L402_CANONICAL_REQUIREMENT.requirement_hash}"`
+        );
+        expect(headers['Idempotency-Key']).toBe("idem_contract_001");
+    });
+
+    test.each([
+        'ch_bad"value',
+        'ch_bad\\value',
+        'ch_bad\r\nInjected: value'
+    ])('buildChallengeHeaders defensively rejects an unsafe challenge identifier', challengeId => {
+        const unsafeRequirement = {
+            ...paidSurfaceReq,
+            canonical_requirement: {
+                ...CONTRACT_L402_CANONICAL_REQUIREMENT,
+                challenge_id: challengeId
+            }
+        };
+
+        expect(() => payment402.buildChallengeHeaders(unsafeRequirement))
+            .toThrow(/challenge_id.*header-safe ASCII/);
+    });
+
+    test('buildSuccessReceiptHeaders identifies unsigned Base64 JSON explicitly', () => {
         const fakeToken = "base64-encoded-receipt-token";
         const headers = payment402.buildSuccessReceiptHeaders(fakeToken);
 
-        expect(headers['PAYMENT-RESPONSE']).toBe('status="success", receipt="base64-encoded-receipt-token"');
+        expect(headers['PAYMENT-RESPONSE']).toBe(
+            'status="success", receipt="base64-encoded-receipt-token", format="unsigned_base64json"'
+        );
         expect(headers['Payment-Receipt']).toBe('base64-encoded-receipt-token');
+        expect(headers['Payment-Receipt-Format']).toBe('unsigned_base64json');
     });
 
-    // --- Added for v1.7.0 ---
-    test('PaidSurfaceRequirement is seamlessly backward compatible with buildChallengeHeaders', () => {
-        const paidSurfaceReq: PaidSurfaceRequirement = {
-            amount: 10,
-            asset: "SATS",
-            surface: {
-                surface_id: "benchmark:ping:v1",
-                resource: "/api/agent/benchmark/ping",
-                action_type: "benchmark_ping",
-                payment_intent: "benchmark",
-                settlement_rail: "l402",
-                deterministic: true,
-                expected_client_behavior: {
-                    action: "pay_and_verify",
-                    reason: "Deterministic paid benchmark endpoint."
-                },
-                evidence_schema: {
-                    schema_version: "monzen_trace.v1",
-                    required: [
-                        "trace_id",
-                        "payment_status",
-                        "execution_status",
-                        "verification_status",
-                        "timestamp"
-                    ]
-                }
-            }
-        };
+    test('legacy direct requirements fail closed at every challenge boundary', () => {
+        const legacyReq: PaymentRequirement = { amount: 50, asset: "SATS" };
 
-        const headers = payment402.buildChallengeHeaders(paidSurfaceReq);
-        
-        // Ensure standard requirement properties map out perfectly.
-        expect(headers['x-402-payment-required']).toBe('price=10; asset=SATS; network=lightning');
-        expect(headers['PAYMENT-REQUIRED']).toBe('network="lightning", amount="10", asset="SATS"');
+        expect(() => payment402.buildChallengeHeaders(legacyReq)).toThrow(
+            "Challenge headers require canonical_requirement."
+        );
+        expect(() => payment402.buildPaidSurfaceChallenge(legacyReq)).toThrow(
+            "Every accepted payment option requires canonical_requirement."
+        );
     });
 
-    // --- Added for v1.7.0 Step 2 ---
-    test('1. buildPaidSurfaceChallenge returns agent-readable challenge', () => {
-        const paidSurfaceReq: PaidSurfaceRequirement = {
-            amount: 10,
-            asset: "SATS",
-            surface: {
-                surface_id: "benchmark:ping:v1",
-                resource: "/api/agent/benchmark/ping",
-                action_type: "benchmark_ping",
-                payment_intent: "benchmark",
-                settlement_rail: "l402",
-                deterministic: true,
-                expected_client_behavior: { action: "pay_and_verify", reason: "testing" },
-                evidence_schema: {
-                    schema_version: "ln_church.execution_receipt.v1",
-                    required: ["trace_id", "payment_status"]
-                }
-            }
-        };
-
+    test('buildPaidSurfaceChallenge returns the canonical option and matching credential', () => {
         const challenge = payment402.buildPaidSurfaceChallenge(paidSurfaceReq);
-        
+
         expect(challenge.schema_version).toBe("ln_church.paid_surface_challenge.v1");
         expect(challenge.error).toBe("Payment Required");
         expect(challenge.surface?.surface_id).toBe("benchmark:ping:v1");
         expect(challenge.accepted_payments[0].amount).toBe(10);
         expect(challenge.accepted_payments[0].asset).toBe("SATS");
         expect(challenge.accepted_payments[0].settlement_rail).toBe("l402");
+        expect(challenge.accepted_payments[0].canonical_requirement).toEqual(
+            CONTRACT_L402_CANONICAL_REQUIREMENT
+        );
+        expect(challenge.accepted_payments[0].credential_challenge).toEqual(
+            contractCredentialChallenge
+        );
+        expect(challenge.accepted_payments[0].credential_challenge?.invoice).not.toMatch(/<[^>]+>/);
+        expect(challenge.accepted_payments[0].credential_challenge?.macaroon).not.toMatch(/<[^>]+>/);
         expect(challenge.expected_client_behavior.action).toBe("pay_and_verify");
         expect(challenge.evidence.required).toContain("trace_id");
-        expect(challenge.instruction_for_agents.next_request_schema).toBeDefined();
+        expect(challenge.instruction_for_agents.next_request_schema["Idempotency-Key"]).toBe(
+            "idem_contract_001"
+        );
     });
 
-    test('2. buildPaidSurfaceChallenge supports legacy PaymentRequirement', () => {
-        const legacyReq: PaymentRequirement = { amount: 50, asset: "SATS" };
-        const challenge = payment402.buildPaidSurfaceChallenge(legacyReq);
-
-        expect(challenge.accepted_payments[0].amount).toBe(50);
-        expect(challenge.expected_client_behavior.action).toBe("pay_and_verify"); // Fallback
-        expect(challenge.surface).toBeUndefined();
-    });
-
-    test('3. buildExecutionReceipt creates standard receipt', () => {
-        const paidSurfaceReq: PaidSurfaceRequirement = {
-            amount: 10,
-            asset: "SATS",
-            surface: { surface_id: "benchmark:ping:v1" }
-        };
-
+    test('buildExecutionReceipt keeps the five receipt states distinct', () => {
         const receipt = payment402.buildExecutionReceipt({
             trace_id: "trace_test_001",
             requirement: paidSurfaceReq,
             authResult: {
                 isValid: true,
-                scheme: "mock",
+                scheme: "L402",
                 payload: {
                     agentId: "agent-1",
                     settledAmount: 10,
                     asset: "SATS",
                     receiptId: "receipt-123",
-                    settlementRail: "l402"
+                    settlementRail: "l402",
+                    settlementVerified: true
                 }
-            }
+            },
+            execution_status: "completed",
+            receipt_state: { delivered: true }
         });
 
         expect(receipt.schema_version).toBe("ln_church.execution_receipt.v1");
@@ -138,20 +166,21 @@ describe('Payment402 Canonical Provider Contract', () => {
         expect(receipt.payment?.amount).toBe(10);
         expect(receipt.payment?.asset).toBe("SATS");
         expect(receipt.proof_reference).toBe("receipt-123");
+        expect(receipt.receipt_format).toBe("unsigned_base64json");
+        expect(receipt.receipt_state).toEqual({
+            present: true,
+            server_asserted: true,
+            signature_verified: false,
+            settlement_verified: true,
+            delivered: true
+        });
         expect(receipt.timestamp).toBeDefined();
     });
 
-    test('4. buildExecutionReceipt handles authResult.isValid === false correctly', () => {
-        const paidSurfaceReq: PaidSurfaceRequirement = {
-            amount: 10,
-            asset: "SATS",
-            surface: { surface_id: "benchmark:ping:v1" }
-        };
-
+    test('buildExecutionReceipt never upgrades failed authorization into execution or settlement', () => {
         const receipt = payment402.buildExecutionReceipt({
             trace_id: "trace_failed_001",
             requirement: paidSurfaceReq,
-            // 決済検証に失敗したケース
             authResult: {
                 isValid: false,
                 error: "Invalid signature"
@@ -160,20 +189,23 @@ describe('Payment402 Canonical Provider Contract', () => {
 
         expect(receipt.schema_version).toBe("ln_church.execution_receipt.v1");
         expect(receipt.trace_id).toBe("trace_failed_001");
-        // 最も重要な検証：失敗時は succeeded/verified になってはいけない
         expect(receipt.payment_status).toBe("failed");
         expect(receipt.verification_status).toBe("failed");
-        expect(receipt.execution_status).toBe("completed"); 
+        expect(receipt.execution_status).toBe("not_started");
+        expect(receipt.receipt_state).toEqual({
+            present: true,
+            server_asserted: true,
+            signature_verified: false,
+            settlement_verified: false,
+            delivered: false
+        });
     });
 });
 
 describe('Adapter Boundary (v1.7.1)', () => {
     const payment402 = new Payment402([]);
     
-    const paidSurfaceReq: PaidSurfaceRequirement = {
-        amount: 10,
-        asset: "SATS",
-        surface: {
+    const paidSurfaceReq = contractRequirement({
             surface_id: "benchmark:ping:v1",
             standard_profiles: [
                 { profile: "ln_church.metadata.v1", status: "native" },
@@ -183,8 +215,7 @@ describe('Adapter Boundary (v1.7.1)', () => {
             external_refs: [
                 { profile: "mpp", version: "future", url: "https://example.com/future-mpp-spec" }
             ]
-        }
-    };
+    });
 
     test('1. default output remains unchanged for ln_church.metadata.v1', () => {
         const defaultChallenge = payment402.buildPaidSurfaceChallenge(paidSurfaceReq);

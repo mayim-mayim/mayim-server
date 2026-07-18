@@ -1,6 +1,9 @@
 {
   "name": "monzenmachi-hono-starter",
   "private": true,
+  "scripts": {
+    "dev": "wrangler dev"
+  },
   "dependencies": {
     "@ln-church/hono": "*",
     "hono": "^4.0.0"
