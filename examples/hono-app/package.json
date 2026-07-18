@@ -6,10 +6,10 @@
   },
   "dependencies": {
     "@ln-church/hono": "*",
-    "hono": "^4.0.0"
+    "hono": "^4.12.30"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
-    "wrangler": "^4.81.1"
+    "wrangler": "^4.112.0"
   }
 }

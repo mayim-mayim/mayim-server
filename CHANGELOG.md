@@ -2,6 +2,21 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.11.2] - 2026-07-19 Security Dependency Update
+
+### Security
+- Raised the production Hono dependency floor to `^4.12.30`, excluding versions affected by the reported high-severity runtime advisory.
+- Raised the development and production-bundle toolchain floors to Wrangler `^4.112.0`, Vitest `^4.1.10`, and `@vitest/ui` `^4.1.10`; the resulting lockfile resolves Vite and related transitive packages outside the reported vulnerable ranges.
+- Synchronized the Hono starter workspace and lockfile to the same safe dependency ranges.
+
+### Release Consistency
+- Aligned all five public package versions, runtime manifests, generated declarations, and workspace lockfile identities to `1.11.2`.
+- Added regression coverage that binds the declared dependency ranges and installed/locked versions to their audited floors.
+
+### Cross-Platform Validation
+- Updated the Wrangler production-bundle test to resolve filesystem URLs correctly and invoke the Wrangler JavaScript CLI through Node on Linux and Windows.
+- Payment verification, replay protection, and public privacy behavior are otherwise unchanged from `1.11.1`.
+
 ## [1.11.1] - 2026-07-18 P0-2 Canonical Payment Boundary
 
 ### Added

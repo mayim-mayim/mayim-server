@@ -1,6 +1,6 @@
 ﻿{
   "name": "@ln-church/hono",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
@@ -13,7 +13,7 @@
     "@ln-church/verifier-faucet": "*",
     "@ln-church/verifier-grant": "*",
     "@ln-church/verifier-l402": "*",
-    "hono": "^4.0.0"
+    "hono": "^4.12.30"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.0.0"

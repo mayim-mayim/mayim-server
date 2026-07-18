@@ -2,18 +2,22 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 describe("Cloudflare Worker production bundle", () => {
     test("bundles the macaroon verifier without a runtime npm require", () => {
-        const repositoryRoot = new URL("../..", import.meta.url).pathname;
+        const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
         const temporaryRoot = mkdtempSync(join(tmpdir(), "ln-church-wrangler-"));
         const outputDirectory = join(temporaryRoot, "bundle");
         const wranglerConfig = join(temporaryRoot, "wrangler-config");
-        const wrangler = join(repositoryRoot, "node_modules", ".bin", "wrangler");
+        const wrangler = fileURLToPath(
+            new URL("../../node_modules/wrangler/bin/wrangler.js", import.meta.url)
+        );
 
         try {
-            execFileSync(wrangler, [
+            execFileSync(process.execPath, [
+                wrangler,
                 "deploy",
                 "examples/hono-app/src/index.ts",
                 "--dry-run",
