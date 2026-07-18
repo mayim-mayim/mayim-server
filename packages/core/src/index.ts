@@ -1,4 +1,5 @@
 import {
+    assertHeaderSafeIdentifier,
     buildCanonicalPaymentRequirement,
     canonicalJson,
     canonicalRequestTarget,
@@ -681,21 +682,38 @@ export class Payment402 {
                 return { isValid: false, error: "Direct settlement canonical requirement was not offered." };
             }
             try {
-                this.assertLegacyCanonicalConsistency(matched);
-                const canonical = await verifyCanonicalPaymentRequirement(authResult.payload.canonicalRequirement);
-                if (canonical.requirement_hash !== matched.canonical_requirement?.requirement_hash) {
+                const offeredCanonical = {
+                    ...await verifyCanonicalPaymentRequirement(matched.canonical_requirement)
+                };
+                this.assertLegacyCanonicalConsistency({
+                    ...matched,
+                    canonical_requirement: offeredCanonical
+                });
+                const credentialCanonical = {
+                    ...await verifyCanonicalPaymentRequirement(authResult.payload.canonicalRequirement)
+                };
+                if (canonicalHash !== credentialCanonical.requirement_hash) {
+                    throw new Error("Credential canonical hash differs from the verifier-declared hash.");
+                }
+                const { requirement_hash: offeredHash, ...offeredFields } = offeredCanonical;
+                const { requirement_hash: credentialHash, ...credentialFields } = credentialCanonical;
+                if (canonicalJson(credentialFields) !== canonicalJson(offeredFields)) {
+                    throw new Error("Credential canonical fields differ from the offered canonical requirement.");
+                }
+                if (credentialHash !== offeredHash) {
                     throw new Error("Credential canonical hash differs from offered canonical hash.");
                 }
                 const target = canonicalRequestTarget(req as Request);
                 for (const field of ["url_scheme", "host", "port", "origin", "method", "resource_url"] as const) {
-                    if (canonical[field] !== target[field]) throw new Error(`${field} request binding mismatch.`);
+                    if (offeredCanonical[field] !== target[field]) throw new Error(`${field} request binding mismatch.`);
                 }
-                if (this.getHeader(req, "Idempotency-Key") !== canonical.idempotency_key) {
+                if (this.getHeader(req, "Idempotency-Key") !== offeredCanonical.idempotency_key) {
                     throw new Error("Idempotency-Key request binding mismatch.");
                 }
-                if (BigInt(canonical.expires_at) <= BigInt(Math.floor(this.now() / 1000))) {
+                if (BigInt(offeredCanonical.expires_at) <= BigInt(Math.floor(this.now() / 1000))) {
                     throw new Error("Canonical payment requirement expired.");
                 }
+                matched = { ...matched, canonical_requirement: offeredCanonical };
             } catch (error: any) {
                 return { isValid: false, error: `Canonical payment verification failed: ${error.message}` };
             }
@@ -756,6 +774,10 @@ export class Payment402 {
         const canonical = primaryReq?.canonical_requirement;
         if (!canonical) throw new Error("Challenge headers require canonical_requirement.");
         this.assertLegacyCanonicalConsistency(primaryReq);
+        // Defend the final serialization boundary as well as canonical shape
+        // validation, so future callers cannot interpolate unsafe identifiers.
+        assertHeaderSafeIdentifier(canonical.challenge_id, "challenge_id");
+        assertHeaderSafeIdentifier(canonical.idempotency_key, "idempotency_key", 8);
 
         let authenticate: string;
         if (canonical.rail === "l402") {

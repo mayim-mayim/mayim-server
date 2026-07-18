@@ -76,6 +76,23 @@ describe('Payment402 Canonical Provider Contract', () => {
         expect(headers['Idempotency-Key']).toBe("idem_contract_001");
     });
 
+    test.each([
+        'ch_bad"value',
+        'ch_bad\\value',
+        'ch_bad\r\nInjected: value'
+    ])('buildChallengeHeaders defensively rejects an unsafe challenge identifier', challengeId => {
+        const unsafeRequirement = {
+            ...paidSurfaceReq,
+            canonical_requirement: {
+                ...CONTRACT_L402_CANONICAL_REQUIREMENT,
+                challenge_id: challengeId
+            }
+        };
+
+        expect(() => payment402.buildChallengeHeaders(unsafeRequirement))
+            .toThrow(/challenge_id.*header-safe ASCII/);
+    });
+
     test('buildSuccessReceiptHeaders identifies unsigned Base64 JSON explicitly', () => {
         const fakeToken = "base64-encoded-receipt-token";
         const headers = payment402.buildSuccessReceiptHeaders(fakeToken);

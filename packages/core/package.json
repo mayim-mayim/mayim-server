@@ -1,6 +1,6 @@
 {
   "name": "@ln-church/server",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"

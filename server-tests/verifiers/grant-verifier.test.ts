@@ -11,6 +11,20 @@ function createMockToken(claims: any) {
     return `${header}.${payload}.${signature}`;
 }
 
+async function createSignedHs256Token(claims: any, key: CryptoKey): Promise<string> {
+    const encode = (value: string) => btoa(value)
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const header = encode(JSON.stringify({ alg: "HS256", typ: "JWT", kid: "test-hs256" }));
+    const payload = encode(JSON.stringify(claims));
+    const signature = await globalThis.crypto.subtle.sign(
+        "HMAC",
+        key,
+        new TextEncoder().encode(`${header}.${payload}`)
+    );
+    const signatureB64 = encode(String.fromCharCode(...new Uint8Array(signature)));
+    return `${header}.${payload}.${signatureB64}`;
+}
+
 describe('GrantVerifier Strict Validation', () => {
     const mockOptions = {
         audience: 'https://kari.mayim-mayim.com',
@@ -136,5 +150,91 @@ describe('GrantVerifier Strict Validation', () => {
 
         expect(result.isValid).toBe(false);
         expect(result.error).toContain("alg is unsupported");
+    });
+
+    it('accepts a signed grant only when its audience equals the normalized request origin', async () => {
+        const key = await globalThis.crypto.subtle.importKey(
+            "raw",
+            new TextEncoder().encode("0123456789abcdef0123456789abcdef"),
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign", "verify"]
+        );
+        const proof = await createSignedHs256Token(baseClaims, key);
+        const verifier = new GrantVerifier({
+            ...mockOptions,
+            issuerKeyResolver: async () => key
+        });
+        const req = new Request(
+            'https://kari.mayim-mayim.com:443/api/agent/omikuji',
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Grant ${proof}`,
+                    'x-agent-id': baseClaims.sub
+                }
+            }
+        );
+
+        await expect(verifier.verify(req)).resolves.toMatchObject({ isValid: true });
+    });
+
+    it.each([
+        ['scheme', 'http://kari.mayim-mayim.com/api/agent/omikuji'],
+        ['host', 'https://alias.mayim-mayim.com/api/agent/omikuji'],
+        ['port', 'https://kari.mayim-mayim.com:444/api/agent/omikuji']
+    ])('rejects a signed grant when request %s differs from the audience origin', async (_field, url) => {
+        const key = await globalThis.crypto.subtle.importKey(
+            "raw",
+            new TextEncoder().encode("0123456789abcdef0123456789abcdef"),
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign", "verify"]
+        );
+        const proof = await createSignedHs256Token(baseClaims, key);
+        const verifier = new GrantVerifier({
+            ...mockOptions,
+            issuerKeyResolver: async () => key
+        });
+        const req = new Request(url, {
+            method: 'POST',
+            headers: {
+                Authorization: `Grant ${proof}`,
+                'x-agent-id': baseClaims.sub
+            }
+        });
+
+        const result = await verifier.verify(req);
+
+        expect(result.isValid).toBe(false);
+        expect(result.error).toContain('Request origin does not match the grant audience');
+    });
+
+    it('rejects a relative request URL because it cannot prove an origin', async () => {
+        const key = await globalThis.crypto.subtle.importKey(
+            "raw",
+            new TextEncoder().encode("0123456789abcdef0123456789abcdef"),
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign", "verify"]
+        );
+        const proof = await createSignedHs256Token(baseClaims, key);
+        const verifier = new GrantVerifier({
+            ...mockOptions,
+            issuerKeyResolver: async () => key
+        });
+        const req = {
+            url: '/api/agent/omikuji',
+            method: 'POST',
+            headers: new Headers({
+                Authorization: `Grant ${proof}`,
+                'x-agent-id': baseClaims.sub
+            })
+        };
+
+        const result = await verifier.verify(req);
+
+        expect(result.isValid).toBe(false);
+        expect(result.error).toContain('Request URL must be an absolute URL');
     });
 });

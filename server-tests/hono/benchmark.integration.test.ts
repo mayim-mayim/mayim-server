@@ -273,7 +273,7 @@ describe('Benchmark Suite Integration', () => {
     // 象限5: Paid Ping (Grant) (強化版)
     test('GET /ping paid via Grant -> returns deterministic response with accurate settlement rail metadata', async () => {
         const proof = benchmarkGrantSigner.sign(validGrantClaims);
-        const req = new Request('http://localhost/ping', {
+        const req = new Request('https://mock-node.com/ping', {
             headers: { 
                 'Authorization': `Grant ${proof}`,
                 'x-agent-id': 'benchmark-grant-agent'
@@ -296,7 +296,7 @@ describe('Benchmark Suite Integration', () => {
     // 象限6: Paid Echo (Grant / paymentOverride)
     test('POST /echo paid via Grant override -> returns deterministic body', async () => {
         const proof = benchmarkGrantSigner.sign(validGrantClaims);
-        const req = new Request('http://localhost/echo', {
+        const req = new Request('https://mock-node.com/echo', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 

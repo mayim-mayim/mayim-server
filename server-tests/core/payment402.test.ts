@@ -7,6 +7,10 @@ import {
     type PaidSurfaceRequirement,
     type PaymentVerifier
 } from '../../packages/core/src/index';
+import {
+    CONTRACT_CLOCK_SECONDS,
+    CONTRACT_L402_CANONICAL_REQUIREMENT
+} from '../fixtures/canonical-l402-contract';
 
 const REQUEST_URL = 'https://provider.test/api/agent/paid';
 
@@ -52,6 +56,43 @@ function validFaucetVerifier(overrides: Record<string, unknown> = {}): PaymentVe
             ...overrides
         }
     });
+}
+
+function validDirectL402Verifier(): PaymentVerifier {
+    return verifier({
+        isValid: true,
+        scheme: 'L402',
+        payload: {
+            agentId: 'l402-agent',
+            settledAmount: 10,
+            asset: 'SATS',
+            receiptId: 'l402-receipt-001',
+            proofId: `sha256:${'8'.repeat(64)}`,
+            paymentId: CONTRACT_L402_CANONICAL_REQUIREMENT.payment_id,
+            settlementRail: 'l402',
+            settlementVerified: true,
+            canonicalRequirement: CONTRACT_L402_CANONICAL_REQUIREMENT,
+            canonicalRequirementHash: CONTRACT_L402_CANONICAL_REQUIREMENT.requirement_hash
+        }
+    });
+}
+
+function directRequest(): Request {
+    return new Request(CONTRACT_L402_CANONICAL_REQUIREMENT.resource_url, {
+        method: CONTRACT_L402_CANONICAL_REQUIREMENT.method,
+        headers: {
+            'Idempotency-Key': CONTRACT_L402_CANONICAL_REQUIREMENT.idempotency_key
+        }
+    });
+}
+
+function directRequirement(canonical = CONTRACT_L402_CANONICAL_REQUIREMENT): PaidSurfaceRequirement {
+    return {
+        amount: 10,
+        asset: 'SATS',
+        surface: { settlement_rail: 'l402', access_path: 'direct_settlement' },
+        canonical_requirement: canonical
+    };
 }
 
 async function preparedRequirements(payment402: Payment402, req: Request) {
@@ -220,5 +261,61 @@ describe('Payment402 Core Engine', () => {
             isValid: false,
             error: 'Replay detected (request_reused).'
         });
+    });
+
+    it('accepts a direct credential only after independently rehashing the offered canonical requirement', async () => {
+        const payment402 = new Payment402([validDirectL402Verifier()], {
+            replayStore: new InMemoryAtomicReplayStore(),
+            now: () => CONTRACT_CLOCK_SECONDS * 1000
+        });
+
+        const result = await payment402.verify(directRequest(), directRequirement());
+
+        expect(result.isValid).toBe(true);
+    });
+
+    it.each([
+        ['schema_version', 'ln_church.canonical_payment_requirement.v2'],
+        ['url_scheme', 'http'],
+        ['host', 'other.test'],
+        ['port', 444],
+        ['origin', 'https://other.test'],
+        ['method', 'POST'],
+        ['resource_url', 'https://provider.test/api/agent/benchmark/other'],
+        ['rail', 'mpp'],
+        ['authorization_scheme', 'MPP'],
+        ['asset_identifier', 'lightning:msats'],
+        ['chain', 'liquid'],
+        ['network', 'bitcoin-testnet'],
+        ['decimals', 2],
+        ['amount_atomic', '10001'],
+        ['pay_to', `03${'1'.repeat(64)}`],
+        ['expires_at', '1700003599'],
+        ['challenge_id', 'ch_contract_l402_002'],
+        ['payment_id', '1'.repeat(64)],
+        ['idempotency_key', 'idem_contract_002'],
+        ['credential_payload_hash', `sha256:${'1'.repeat(64)}`],
+        ['requirement_hash', `sha256:${'2'.repeat(64)}`]
+    ])('rejects a presented canonical requirement whose %s field was changed', async (field, replacement) => {
+        let consumeCalls = 0;
+        const replayStore: AtomicReplayStore = {
+            consume: async () => {
+                consumeCalls += 1;
+                return { consumed: true };
+            }
+        };
+        const payment402 = new Payment402([validDirectL402Verifier()], {
+            replayStore,
+            now: () => CONTRACT_CLOCK_SECONDS * 1000
+        });
+        const tampered = {
+            ...CONTRACT_L402_CANONICAL_REQUIREMENT,
+            [field]: replacement
+        } as typeof CONTRACT_L402_CANONICAL_REQUIREMENT;
+
+        const result = await payment402.verify(directRequest(), directRequirement(tampered));
+
+        expect(result.isValid).toBe(false);
+        expect(consumeCalls).toBe(0);
     });
 });

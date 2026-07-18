@@ -43,4 +43,34 @@ describe("Canonical payment requirement v1", () => {
             extra: "forbidden"
         })).rejects.toThrow(/keys must exactly match/);
     });
+
+    test.each([
+        ['quote', 'ch_bad"value'],
+        ['backslash', 'ch_bad\\value'],
+        ['carriage return', 'ch_bad\rvalue'],
+        ['line feed', 'ch_bad\nvalue'],
+        ['control', `ch_bad${String.fromCharCode(0)}value`],
+        ['space', 'ch_bad value'],
+        ['non-ASCII', 'ch_bad_識別子']
+    ])("rejects %s in a challenge_id before it can reach a header", async (_name, challengeId) => {
+        const { requirement_hash: _hash, ...input } = CONTRACT_L402_CANONICAL_REQUIREMENT;
+
+        await expect(buildCanonicalPaymentRequirement({
+            ...input,
+            challenge_id: challengeId
+        })).rejects.toThrow(/challenge_id.*header-safe ASCII/);
+    });
+
+    test.each([
+        'idem_bad"value',
+        'idem_bad\\value',
+        'idem_bad\r\nvalue'
+    ])("rejects unsafe idempotency identifiers emitted as response headers", async idempotencyKey => {
+        const { requirement_hash: _hash, ...input } = CONTRACT_L402_CANONICAL_REQUIREMENT;
+
+        await expect(buildCanonicalPaymentRequirement({
+            ...input,
+            idempotency_key: idempotencyKey
+        })).rejects.toThrow(/idempotency_key.*header-safe ASCII/);
+    });
 });

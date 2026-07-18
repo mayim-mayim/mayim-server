@@ -53,6 +53,27 @@ const CANONICAL_REQUIREMENT_KEYS = [
 
 const HASH_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const POSITIVE_ATOMIC_PATTERN = /^[1-9][0-9]*$/;
+const HEADER_SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]+$/;
+
+/**
+ * Identifiers interpolated into HTTP challenge headers are deliberately more
+ * restrictive than arbitrary canonical strings. This excludes quotes,
+ * backslashes, whitespace, controls, non-ASCII text, and header delimiters.
+ */
+export function assertHeaderSafeIdentifier(
+    value: unknown,
+    field: string,
+    minimumLength = 1
+): asserts value is string {
+    if (typeof value !== "string"
+        || value.length < minimumLength
+        || value.length > 200
+        || !HEADER_SAFE_IDENTIFIER_PATTERN.test(value)) {
+        throw new Error(
+            `${field} must be ${minimumLength}-200 header-safe ASCII characters (A-Z, a-z, 0-9, ., _, :, or -).`
+        );
+    }
+}
 
 function assertCanonicalJsonValue(value: unknown, path: string): void {
     if (value === null || value === undefined) {
@@ -175,6 +196,8 @@ export function validateCanonicalRequirementShape(requirement: unknown): asserts
     if (!HASH_PATTERN.test(value.requirement_hash as string)) {
         throw new Error("requirement_hash must use sha256:<lowercase hex> form.");
     }
+    assertHeaderSafeIdentifier(value.challenge_id, "challenge_id");
+    assertHeaderSafeIdentifier(value.idempotency_key, "idempotency_key", 8);
 
     const parsedResource = new URL(value.resource_url as string);
     const expectedPort = parsedResource.port

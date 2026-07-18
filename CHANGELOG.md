@@ -2,6 +2,21 @@
 
 All notable changes to the `@ln-church/server` and Monzenmachi Hono Starter Kit will be documented in this file.
 
+## [1.11.1] - 2026-07-18 P0-2 Canonical Payment Boundary
+
+### Added
+- Added canonical payment requirements that bind challenge identity, request origin and target, method, amount, asset, settlement rail, credential payload, expiry, and idempotency identity under a verified requirement hash.
+- Added production 402 challenge and success receipt metadata that preserve the same canonical identity across response bodies and headers.
+
+### Verification & Replay Safety
+- Verifiers independently re-hash offered and presented canonical requirements, compare every canonical field, enforce normalized request origin and method/path binding, and reject expired or mismatched credentials before replay consumption.
+- Paid execution requires an atomic replay store and consumes each request identity exactly once; replay attempts fail closed with `request_reused` or the corresponding identity-reuse reason.
+- Challenge identifiers are restricted to a header-safe ASCII subset before serialization.
+
+### Privacy Boundary
+- Public challenge, receipt, and persisted evidence projections exclude raw macaroons, preimages, Authorization credentials, receipt tokens, private keys, and secret material.
+- This entry records Private release preparation only; Public promotion, tagging, and registry publication are not part of this change.
+
 ## [1.11.0] - 2026-06-27 Server Support Matrix & Capability Boundaries
 
 ### Added

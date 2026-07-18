@@ -194,9 +194,21 @@ export class GrantVerifier implements PaymentVerifier {
             if (!this.options.trustedIssuers.includes(claims.iss)) throw new Error("Untrusted issuer.");
             if (claims.aud !== this.options.audience) throw new Error("Audience mismatch.");
 
-            // Scope Validation
+            // Bind the configured and signed audience to the origin that
+            // actually received this request. A relative URL cannot prove an
+            // origin and must not inherit the configured audience implicitly.
             const urlStr = typeof req.url === 'string' ? req.url : (req.url?.toString() || "");
-            const url = new URL(urlStr, this.options.audience);
+            let url: URL;
+            try {
+                url = new URL(urlStr);
+            } catch {
+                throw new Error("Request URL must be an absolute URL for grant audience binding.");
+            }
+            if (url.origin !== this.options.audience || claims.aud !== url.origin) {
+                throw new Error("Request origin does not match the grant audience.");
+            }
+
+            // Scope Validation
             if (!claims.scope.routes.includes(url.pathname)) throw new Error("Route not in scope.");
             
             const method = typeof req.method === 'string' ? req.method.toUpperCase() : "GET";

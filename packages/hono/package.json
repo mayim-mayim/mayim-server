@@ -1,12 +1,12 @@
 ﻿{
   "name": "@ln-church/hono",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist"],
+  "files": ["dist", "README.md", "LICENSE"],
   "publishConfig": { "access": "public" },
   "dependencies": {
     "@ln-church/server": "*",
