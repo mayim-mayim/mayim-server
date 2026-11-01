@@ -1,26 +1,30 @@
-# ln-church-server
+# mayim-server
+
+**mayim-server** is the provider-side SDK repository for mayim Agent Gigs (mAG), formerly LN Church.
+
+The examples below describe the SDK version tracked here. Existing `@ln-church/*` package names, import paths, API routes, and schema identifiers are unchanged by this documentation update.
 
 
 **The Value of "Not a Verdict"**
-LN Church read models do not decide for the agent. They preserve **observed memory**: what was seen, what was paid, what failed, what receipt shape appeared, what protocol role was observed, and what verification cost was reported. This is not a recommendation or verdict; it is a **reusable observation record** that helps the local runtime avoid re-verifying everything. Final payment authority remains local.
+mAG read models do not decide for the agent. They preserve **observed memory**: what was seen, what was paid, what failed, what receipt shape appeared, what protocol role was observed, and what verification cost was reported. This is not a recommendation or verdict; it is a **reusable observation record** that helps the local runtime avoid re-verifying everything. Final payment authority remains local.
 
 
 Your API will be hit by autonomous agents.
 
 Can it issue 402 challenges, accept settlement, verify execution, and produce evidence — leveraging L402 natively, and providing structured metadata boundaries for MPP and x402?
 
-`ln-church-server` is a **provider-side starter** for building agent-facing paid APIs.
-It helps developers expose HTTP 402-compatible endpoints that autonomous agents can benchmark, pay, execute, and trace through the LN Church ecosystem.
+`mayim-server` is a **provider-side starter** for building agent-facing paid APIs.
+It helps developers expose HTTP 402-compatible endpoints that autonomous agents can benchmark, pay, execute, and trace through the mAG ecosystem.
 
-In the broader agentic commerce stack, `ln-church-server` helps providers participate in an observability and trust-evidence layer by exposing HTTP 402-compatible paid actions as inspectable, verifiable surfaces.
+In the broader agentic commerce stack, `mayim-server` helps providers participate in an observability and trust-evidence layer by exposing HTTP 402-compatible paid actions as inspectable, verifiable surfaces.
 
-It is the seller-side counterpart to `ln-church-agent`: while the agent decides how to pay, the server makes paid API surfaces explicit, inspectable, and verifiable.
+It is the seller-side counterpart to `mayim-agent`: while the agent decides how to pay, the server makes paid API surfaces explicit, inspectable, and verifiable.
 
 ## Core Doctrine
 
 **Do not make agents spend tokens guessing how your paid API works.**
 
-`ln-church-server` exists to turn provider-side paid actions into deterministic, inspectable, and verifiable HTTP 402 surfaces.
+`mayim-server` exists to turn provider-side paid actions into deterministic, inspectable, and verifiable HTTP 402 surfaces.
 
 A provider should not expose a vague paywall that forces autonomous agents to guess:
 - how payment is challenged,
@@ -48,7 +52,7 @@ This reduces repeated inspection cost while preserving auditability through rece
 ## What it does
 
 Most payment infrastructure helps providers charge.  
-`ln-church-server` helps providers expose agent-facing paid-action endpoints that can participate in the whole **402 loop**:
+`mayim-server` helps providers expose agent-facing paid-action endpoints that can participate in the whole **402 loop**:
 
 **Challenge → Settle → Execute → Verify → Emit Evidence**
 
@@ -58,31 +62,31 @@ It is designed for providers that must:
 - **Verify** settlement evidence before executing protected actions.
 - **Return** receipts or verifiable responses after execution.
 - **Expose** benchmarkable endpoints for client interoperability testing.
-- **Connect** to LN Church Sandbox / observability flows for public proof.
+- **Connect** to mAG Sandbox / observability flows for public proof.
 
 ## Where it fits
 
-`ln-church-server` is the provider-side counterpart to `ln-church-agent`.
+`mayim-server` is the provider-side counterpart to `mayim-agent`.
 
 Together, they reduce the reasoning burden of autonomous agents around paid API execution:
 
 | Component | Role | Core responsibility |
 |---|---|---|
-| `ln-church-agent` | Buyer-side runtime | Decide whether and how an agent should pay, execute, and verify an HTTP 402 flow |
-| `ln-church-server` | Provider-side runtime | Expose paid API capabilities as agent-readable surfaces with challenge, execution, and evidence metadata |
-| LN Church Sandbox / Observatory | Collect benchmark, receipt, trace, and interop evidence from both sides |
+| `mayim-agent` | Buyer-side runtime | Decide whether and how an agent should pay, execute, and verify an HTTP 402 flow |
+| `mayim-server` | Provider-side runtime | Expose paid API capabilities as agent-readable surfaces with challenge, execution, and evidence metadata |
+| mAG Sandbox / Observatory | Collect benchmark, receipt, trace, and interop evidence from both sides |
 
 In short:
 
-- `ln-church-agent` prevents agents from spending tokens figuring out how to pay.
-- `ln-church-server` prevents agents from spending tokens guessing how a paid API works.
-- LN Church Sandbox makes the resulting behavior observable and comparable.
+- `mayim-agent` prevents agents from spending tokens figuring out how to pay.
+- `mayim-server` prevents agents from spending tokens guessing how a paid API works.
+- mAG Sandbox makes the resulting behavior observable and comparable.
 
 ---
 
 ## Support Matrix & Provider Boundaries
 
-**Important:** `ln-church-server` is **not a payment processor, wallet provider, or managed payment rail**. It is a reusable observed memory layer and provider-side starter designed to expose agent-readable paid surfaces and execution receipts.
+**Important:** `mayim-server` is **not a payment processor, wallet provider, or managed payment rail**. It is a reusable observed memory layer and provider-side starter designed to expose agent-readable paid surfaces and execution receipts.
 
 The following matrix clarifies what is actively verified by this package versus what is merely supported as a metadata boundary.
 
@@ -99,7 +103,7 @@ The following matrix clarifies what is actively verified by this package versus 
 
 ## Agent-Readable Paid Surfaces
 
-As of v1.7.0, `ln-church-server` can expose provider capabilities as **agent-readable paid surfaces**.
+As of v1.7.0, `mayim-server` can expose provider capabilities as **agent-readable paid surfaces**.
 
 A paid surface is not just a paywall. It is a machine-readable descriptor that tells agents:
 
@@ -184,7 +188,7 @@ Paid requests can return:
 This lets agents avoid spending reasoning tokens on payment mechanics and instead delegate repetitive interpretation to their runtime.
 
 **Provider-Declared Intent Hints (v1.10.1)**
-`ln-church-server` v1.10.1 lets providers attach optional `intent_hints` to paid surface descriptors. These hints are provider-declared candidate metadata that help agents and Hon-den understand what a surface claims to be useful for. They are not taxonomy truth, recommendations, verdicts, routing decisions, trust scores, or payment proofs. The server SDK does not automatically report them to Hon-den.
+`mayim-server` v1.10.1 lets providers attach optional `intent_hints` to paid surface descriptors. These hints are provider-declared candidate metadata that help agents and Hon-den understand what a surface claims to be useful for. They are not taxonomy truth, recommendations, verdicts, routing decisions, trust scores, or payment proofs. The server SDK does not automatically report them to Hon-den.
 
 ---
 
@@ -201,7 +205,7 @@ Payment rails remain exactly as they are (L402 / x402 / MPP / faucet / grant etc
 - **OpenAPI Extension:** `GET /api/agent/openapi-paid-surfaces`
 
 **Observability & Safety:**
-The SDK **does not** automatically report or emit telemetry to the LN Church Observatory. Public-safe observation drafts can be generated optionally and explicitly by the provider, ensuring no secret material (raw receipts, macaroon secrets, grant secrets, or authorization headers) is ever exposed.
+The SDK **does not** automatically report or emit telemetry to the mAG Observatory. Public-safe observation drafts can be generated optionally and explicitly by the provider, ensuring no secret material (raw receipts, macaroon secrets, grant secrets, or authorization headers) is ever exposed.
 
 ---
 
@@ -288,7 +292,7 @@ These endpoints are the core of **Public Evaluability**. They exist purely for m
   * **Role**: Validates POST payload integrity and 402-retry behavior. Reflects the input text alongside execution metadata.
   * **Price**: 10 SATS / 1 Faucet Credit
 * **`GET /api/agent/benchmark/replay/{corpus_id}`**
-  * **Role**: Returns a synthetic replay descriptor derived from LN Church Interop Corpus.
+  * **Role**: Returns a synthetic replay descriptor derived from mAG Interop Corpus.
   * **Purpose**: Lets agents validate whether their parser and behavior selection match previously observed protocol shapes.
   * **Replay Type**: `synthetic_from_corpus_v1`.
 * **`GET /api/agent/benchmark/replay/{corpus_id}/challenge`**
@@ -299,7 +303,7 @@ These endpoints are the core of **Public Evaluability**. They exist purely for m
 
 ### Synthetic Corpus Replay
 
-The server can expose LN Church Interop Corpus items as synthetic benchmark replays.
+The server can expose mAG Interop Corpus items as synthetic benchmark replays.
 
 This allows buyer-side agents to validate whether their parser and decision engine handle previously observed protocol shapes correctly.
 
@@ -340,7 +344,7 @@ The manifest includes `paid_surfaces`, accepted payment options, expected client
 
 ## Surface Preflight Provider Diagnostics
 
-`ln-church-server` can expose provider-side preflight hints so agents and operators can query Hon-den’s Surface Preflight Read Model before touching a paid surface.
+`mayim-server` can expose provider-side preflight hints so agents and operators can query Hon-den’s Surface Preflight Read Model before touching a paid surface.
 
 * **This is read-only**
 * **Not a recommendation. A reusable observation record**
@@ -387,7 +391,7 @@ curl "https://your-node.example/api/agent/preflight?path=/api/agent/json-repair"
 
 ## Paid Surface Diagnostics
 
-`ln-church-server` can query LN Church Observatory for public-safe observations about your own paid surfaces.
+`mayim-server` can query mAG Observatory for public-safe observations about your own paid surfaces.
 
 This lets site operators check whether agents have observed payment frictions such as:
 - retry mismatch
@@ -397,8 +401,8 @@ This lets site operators check whether agents have observed payment frictions su
 
 **Important Safety Constraints:**
 - These records are **not verdicts** about endpoint correctness. They are observed client/runtime conditions.
-- `ln-church-server` does not automatically poll, send telemetry, or ingest direct feedback from agents.
-- The LN Church Observatory is a public ledger, and this SDK provides a strictly **read-only** helper to query it on demand.
+- `mayim-server` does not automatically poll, send telemetry, or ingest direct feedback from agents.
+- The mAG Observatory is a public ledger, and this SDK provides a strictly **read-only** helper to query it on demand.
 
 **Helper Usage:**
 ```ts
@@ -442,18 +446,18 @@ An experimental pre-payment access path for sponsor-funded execution.
 
 ## 🌍 Where this fits in the ecosystem
 
-* **Buyer-Side Runtime**: [`ln-church-agent`](https://github.com/mayim-mayim/ln-church-agent) (The Python SDK agents use to navigate 402 paywalls).
-* **Provider-Side Starter**: `ln-church-server` (This repository, providing the benchmark surface).
-* **Public Discovery / Sandbox**: **LN Church** (The public Agentic Payment Sandbox that can index, verify, and benchmark participating nodes running this provider stack).
+* **Buyer-Side Runtime**: [`mayim-agent`](https://github.com/mayim-mayim/mayim-agent) (The Python SDK agents use to navigate 402 paywalls).
+* **Provider-Side Starter**: `mayim-server` (This repository, providing the benchmark surface).
+* **Public Discovery / Sandbox**: **mAG** (The public Agentic Payment Sandbox that can index, verify, and benchmark participating nodes running this provider stack).
 
-*Note: Joining the public LN Church discovery network (`/api/agent/network/join`) is entirely optional. Your server operates as a fully autonomous benchmark node by default.*
+*Note: Joining the public mAG discovery network (`/api/agent/network/join`) is entirely optional. Your server operates as a fully autonomous benchmark node by default.*
 
 ---
 
 ### Standard-ready adapter boundary
 
 `PaidSurfaceRequirement` is an internal provider-side descriptor, not a competing standard.
-As external payment and commerce protocols evolve, `ln-church-server` can map
+As external payment and commerce protocols evolve, `mayim-server` can map
 the same internal route definitions into future external profiles through
 mapper boundaries. Canonical requirements and atomic replay consumption are a
 deliberate paid-execution migration boundary, not a claim that every historical
